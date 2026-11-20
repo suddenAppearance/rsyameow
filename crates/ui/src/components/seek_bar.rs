@@ -3,6 +3,8 @@ use gpui::{
     App, Bounds, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     RenderOnce, Window, canvas, prelude::*, px, relative,
 };
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -63,6 +65,11 @@ impl RenderOnce for SeekBar {
         let preview_for_move = preview;
         let commit_for_up = commit.clone();
         let commit_for_up_out = commit;
+        let dragging = Rc::new(Cell::new(false));
+        let dragging_for_down = dragging.clone();
+        let dragging_for_move = dragging.clone();
+        let dragging_for_up = dragging.clone();
+        let dragging_for_up_out = dragging;
 
         gpui::div()
             .relative()
@@ -80,13 +87,14 @@ impl RenderOnce for SeekBar {
                     let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
                         return;
                     };
+                    dragging_for_down.set(true);
                     if let Some(handler) = preview_for_down.as_ref() {
                         handler(fraction, window, cx);
                     }
                 },
             )
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                if !event.dragging() {
+                if !event.dragging() || !dragging_for_move.get() {
                     return;
                 }
                 let Ok(bounds) = bounds_for_move.lock() else {
@@ -108,7 +116,9 @@ impl RenderOnce for SeekBar {
                     let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
                         return;
                     };
-                    if let Some(handler) = commit_for_up.as_ref() {
+                    if dragging_for_up.replace(false)
+                        && let Some(handler) = commit_for_up.as_ref()
+                    {
                         handler(fraction, window, cx);
                     }
                 },
@@ -122,7 +132,9 @@ impl RenderOnce for SeekBar {
                     let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
                         return;
                     };
-                    if let Some(handler) = commit_for_up_out.as_ref() {
+                    if dragging_for_up_out.replace(false)
+                        && let Some(handler) = commit_for_up_out.as_ref()
+                    {
                         handler(fraction, window, cx);
                     }
                 },
