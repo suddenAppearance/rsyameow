@@ -39,7 +39,78 @@ pub(crate) enum Screen {
     Search,
     Playlists,
     Playlist,
+    Artist,
+    Album,
+    Track,
+    Wave,
     LoadError(String),
+}
+
+/// State of the artist page.
+#[derive(Default)]
+pub(crate) struct ArtistState {
+    pub(crate) id: Option<u64>,
+    pub(crate) artist: Option<Artist>,
+    pub(crate) tracks: Vec<Track>,
+    pub(crate) albums: Vec<Album>,
+    pub(crate) loading: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) epoch: u64,
+}
+
+/// Tracks fetched for "Моя волна".
+#[derive(Default)]
+pub(crate) struct WaveState {
+    pub(crate) tracks: Vec<Track>,
+    pub(crate) loaded: bool,
+    pub(crate) loading: bool,
+    pub(crate) fetching: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) epoch: u64,
+}
+
+/// Which collection produced the current playback queue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum QueueSource {
+    #[default]
+    Liked,
+    Search,
+    Playlist,
+    Artist,
+    Wave,
+}
+
+impl QueueSource {
+    fn key(self) -> &'static str {
+        match self {
+            QueueSource::Liked => "liked",
+            QueueSource::Search => "search",
+            QueueSource::Playlist => "playlist",
+            QueueSource::Artist => "artist",
+            QueueSource::Wave => "wave",
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "search" => QueueSource::Search,
+            "playlist" => QueueSource::Playlist,
+            "artist" => QueueSource::Artist,
+            "wave" => QueueSource::Wave,
+            _ => QueueSource::Liked,
+        }
+    }
+}
+
+/// State of the album page.
+#[derive(Default)]
+pub(crate) struct AlbumState {
+    pub(crate) id: Option<u64>,
+    pub(crate) album: Option<Album>,
+    pub(crate) tracks: Vec<Track>,
+    pub(crate) loading: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) epoch: u64,
 }
 
 /// State of the playlists browser.
@@ -111,6 +182,9 @@ pub(crate) struct PlayerState {
     pub(crate) position: Duration,
     pub(crate) error: Option<String>,
     pub(crate) quality: Option<String>,
+    /// Whether the audio backend currently contains this track. Restored
+    /// tracks are shown paused and loaded lazily on the first Play.
+    pub(crate) audio_ready: bool,
 }
 
 impl PlayerState {
@@ -139,6 +213,11 @@ pub struct RootView {
     pub(crate) search_epoch: u64,
     pub(crate) playlists: PlaylistsState,
     pub(crate) playlist_covers: HashMap<String, Arc<Image>>,
+    pub(crate) artist: ArtistState,
+    pub(crate) album: AlbumState,
+    pub(crate) wave: WaveState,
+    pub(crate) queue_source: QueueSource,
+    pub(crate) nav_stack: Vec<Screen>,
     pub(crate) search_images: HashMap<String, Arc<Image>>,
     pub(crate) show_token_input: bool,
     pub(crate) login_error: Option<String>,
@@ -163,6 +242,7 @@ pub struct RootView {
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
+    state_save_epoch: u64,
     pub(crate) focus_handle: FocusHandle,
     _token_subscription: Subscription,
     _search_subscription: Subscription,
@@ -220,6 +300,11 @@ impl RootView {
             search_epoch: 0,
             playlists: PlaylistsState::default(),
             playlist_covers: HashMap::new(),
+            artist: ArtistState::default(),
+            album: AlbumState::default(),
+            wave: WaveState::default(),
+            queue_source: QueueSource::Liked,
+            nav_stack: Vec::new(),
             search_images: HashMap::new(),
             show_token_input: false,
             login_error: None,
@@ -244,6 +329,7 @@ impl RootView {
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
+            state_save_epoch: 0,
             focus_handle,
             _token_subscription: token_subscription,
             _search_subscription: search_subscription,
@@ -526,9 +612,15 @@ impl RootView {
         self.pending_save_token = None;
         self.search = SearchState::default();
         self.search_epoch += 1;
+        self.artist = ArtistState::default();
+        self.album = AlbumState::default();
+        self.wave = WaveState::default();
+        self.queue_source = QueueSource::Liked;
+        self.nav_stack.clear();
         self.reset_playlists();
         self.token_input.update(cx, |input, cx| input.clear(cx));
         self.search_input.update(cx, |input, cx| input.clear(cx));
+        config::clear_app_state();
         cx.notify();
     }
 
@@ -548,6 +640,11 @@ impl RootView {
         self.queue_track_cache.clear();
         self.queue_fetching = false;
         self.like_busy = false;
+        self.artist = ArtistState::default();
+        self.album = AlbumState::default();
+        self.wave = WaveState::default();
+        self.queue_source = QueueSource::Liked;
+        self.nav_stack.clear();
         self.reset_playlists();
         self.audio.stop();
         cx.notify();
@@ -595,6 +692,7 @@ impl RootView {
                         this.screen = Screen::Profile;
                         this.login_error = None;
                         this.load_covers(tracks, cx);
+                        this.restore_state(cx);
                     }
                     Err(error) => this.handle_profile_error(error, cx),
                 }
@@ -611,6 +709,7 @@ impl RootView {
                 self.pending_save_token = None;
                 self.client.clear_token();
                 config::clear_token();
+                config::clear_app_state();
                 self.screen = Screen::Login;
                 self.login_error = Some("Яндекс отклонил токен. Войдите в аккаунт заново.".into());
             }
@@ -701,6 +800,11 @@ impl RootView {
         self.search_images.clear();
         self.search_epoch += 1;
         self.search_input.update(cx, |input, cx| input.clear(cx));
+        self.artist = ArtistState::default();
+        self.album = AlbumState::default();
+        self.wave = WaveState::default();
+        self.queue_source = QueueSource::Liked;
+        self.nav_stack.clear();
         self.reset_playlists();
 
         let tracks = demo::tracks();
@@ -711,6 +815,7 @@ impl RootView {
             total_liked: 248,
             sample: tracks,
         });
+        self.restore_state(cx);
         cx.notify();
     }
 
@@ -724,6 +829,8 @@ impl RootView {
         self.player.loading = false;
         self.player.error = None;
         self.player.quality = Some("MP3 · 320 кбит/с · демо".into());
+        self.player.audio_ready = true;
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -734,7 +841,9 @@ impl RootView {
             return;
         }
         self.screen = Screen::Search;
+        self.nav_stack.clear();
         self.queue_open = false;
+        self.schedule_state_save(cx);
         let focus = self.search_input.read(cx).focus_handle(cx);
         window.focus(&focus);
         cx.notify();
@@ -745,7 +854,9 @@ impl RootView {
             return;
         }
         self.screen = Screen::Profile;
+        self.nav_stack.clear();
         self.queue_open = false;
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -754,7 +865,9 @@ impl RootView {
             return;
         }
         self.screen = Screen::Liked;
+        self.nav_stack.clear();
         self.queue_open = false;
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -954,6 +1067,24 @@ impl RootView {
         .detach();
     }
 
+    fn load_search_images(&mut self, cx: &mut Context<Self>) {
+        if self.demo {
+            return;
+        }
+        let mut covers = Vec::new();
+        for artist in &self.search.artists {
+            if let (Some(id), Some(url)) = (artist.id, artist.cover_url(200)) {
+                covers.push((format!("artist-{id}"), url));
+            }
+        }
+        for album in &self.search.albums {
+            if let (Some(id), Some(url)) = (album.id, album.cover_url(300)) {
+                covers.push((format!("album-{id}"), url));
+            }
+        }
+        self.load_entity_images(None, covers, cx);
+    }
+
     pub(crate) fn set_search_kind(&mut self, kind: SearchKind, cx: &mut Context<Self>) {
         if self.search.kind == kind {
             return;
@@ -980,83 +1111,6 @@ impl RootView {
         self.run_search(query, 0, cx);
     }
 
-    pub(crate) fn search_for_artist(&mut self, name: String, cx: &mut Context<Self>) {
-        self.search.kind = SearchKind::Tracks;
-        self.search_input
-            .update(cx, |input, cx| input.set_text(name.clone(), cx));
-        self.run_search(name, 0, cx);
-    }
-
-    pub(crate) fn search_for_album(&mut self, album: Album, cx: &mut Context<Self>) {
-        let artists = album.artist_names();
-        let query = if artists.is_empty() {
-            album.display_title().to_string()
-        } else {
-            format!("{} {}", artists, album.display_title())
-        };
-        self.search.kind = SearchKind::Tracks;
-        self.search_input
-            .update(cx, |input, cx| input.set_text(query.clone(), cx));
-        self.run_search(query, 0, cx);
-    }
-
-    fn load_search_images(&mut self, cx: &mut Context<Self>) {
-        if self.demo {
-            return;
-        }
-        let epoch = self.search_epoch;
-        let mut covers: Vec<(String, String)> = Vec::new();
-        for artist in &self.search.artists {
-            if let (Some(id), Some(url)) = (artist.id, artist.cover_url(200)) {
-                covers.push((format!("artist-{id}"), url));
-            }
-        }
-        for album in &self.search.albums {
-            if let (Some(id), Some(url)) = (album.id, album.cover_url(300)) {
-                covers.push((format!("album-{id}"), url));
-            }
-        }
-        if covers.is_empty() {
-            return;
-        }
-
-        let client = self.client.clone();
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            for (key, url) in covers {
-                let already = this
-                    .update(cx, |this, _| this.search_images.contains_key(&key))
-                    .unwrap_or(true);
-                if already {
-                    continue;
-                }
-                let client = client.clone();
-                let bytes = cx
-                    .background_spawn(async move { client.download_image(&url).ok() })
-                    .await;
-                let Some(bytes) = bytes else {
-                    continue;
-                };
-                let Some(image) = decode_image(bytes) else {
-                    continue;
-                };
-                let keep_going = this
-                    .update(cx, |this, cx| {
-                        if this.search_epoch != epoch {
-                            return false;
-                        }
-                        this.search_images.insert(key, image);
-                        cx.notify();
-                        true
-                    })
-                    .unwrap_or(false);
-                if !keep_going {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(crate) fn play_search_result(&mut self, track: Track, cx: &mut Context<Self>) {
         let same_track = self
             .player
@@ -1073,6 +1127,7 @@ impl RootView {
         for item in &results {
             self.cache_track(item);
         }
+        self.queue_source = QueueSource::Search;
         self.queue = results.iter().map(Track::full_id).collect();
         self.queue_index = results.iter().position(|item| item.id == track.id);
 
@@ -1208,6 +1263,827 @@ impl RootView {
         }
     }
 
+    // ------------------------------------------------------------- Persistence
+
+    fn screen_key(&self) -> &'static str {
+        match self.screen {
+            Screen::Profile | Screen::Login | Screen::Loading | Screen::LoadError(_) => "profile",
+            Screen::Liked => "liked",
+            Screen::Search => "search",
+            Screen::Playlists => "playlists",
+            Screen::Playlist => "playlist",
+            Screen::Artist => "artist",
+            Screen::Album => "album",
+            Screen::Track => "track",
+            Screen::Wave => "wave",
+        }
+    }
+
+    fn search_kind_key(&self) -> &'static str {
+        match self.search.kind {
+            SearchKind::Tracks => "tracks",
+            SearchKind::Artists => "artists",
+            SearchKind::Albums => "albums",
+        }
+    }
+
+    fn capture_state(&self) -> config::AppState {
+        config::AppState {
+            version: 1,
+            demo: self.demo,
+            uid: self
+                .profile
+                .as_ref()
+                .and_then(|profile| profile.status.account.as_ref())
+                .and_then(|account| account.uid),
+            screen: self.screen_key().to_string(),
+            search_query: self.search.query.clone(),
+            search_kind: self.search_kind_key().to_string(),
+            queue: self.queue.clone(),
+            queue_index: self.queue_index,
+            track_id: self.player.track.as_ref().map(|track| track.id.clone()),
+            position_ms: self.player.position.as_millis().min(u64::MAX as u128) as u64,
+            quality: self.player.quality.clone(),
+            queue_open: self.queue_open,
+            queue_source: self.queue_source.key().to_string(),
+            playlist_id: self
+                .playlists
+                .selected
+                .as_ref()
+                .map(|playlist| playlist.playlist_id())
+                .filter(|id| !id.is_empty()),
+            artist_id: if matches!(self.screen, Screen::Artist) {
+                self.artist.id
+            } else {
+                None
+            },
+            album_id: if matches!(self.screen, Screen::Album) {
+                self.album.id
+            } else {
+                None
+            },
+        }
+    }
+
+    fn save_state_now(&self) {
+        if self.profile.is_none() {
+            return;
+        }
+        if let Err(error) = config::save_app_state(&self.capture_state()) {
+            eprintln!("rsyameow: failed to save state: {error}");
+        }
+    }
+
+    pub(crate) fn schedule_state_save(&mut self, cx: &mut Context<Self>) {
+        if self.profile.is_none() {
+            return;
+        }
+        self.state_save_epoch += 1;
+        let epoch = self.state_save_epoch;
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            Timer::after(Duration::from_millis(600)).await;
+            this.update(cx, |this, _| {
+                if this.state_save_epoch == epoch {
+                    this.save_state_now();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn restore_state(&mut self, cx: &mut Context<Self>) {
+        let Some(state) = config::load_app_state() else {
+            return;
+        };
+        if state.demo != self.demo {
+            return;
+        }
+        if !self.demo {
+            let current_uid = self
+                .profile
+                .as_ref()
+                .and_then(|profile| profile.status.account.as_ref())
+                .and_then(|account| account.uid);
+            if state.uid.is_some() && state.uid != current_uid {
+                return;
+            }
+        }
+
+        self.search.kind = match state.search_kind.as_str() {
+            "artists" => SearchKind::Artists,
+            "albums" => SearchKind::Albums,
+            _ => SearchKind::Tracks,
+        };
+        self.search.query = state.search_query.clone();
+        if !state.search_query.is_empty() {
+            self.search_input.update(cx, |input, cx| {
+                input.set_text(state.search_query.clone(), cx)
+            });
+        }
+
+        if !state.queue.is_empty() {
+            self.queue = state.queue.clone();
+            self.queue_index = state.queue_index.filter(|index| *index < self.queue.len());
+        }
+        self.queue_source = QueueSource::from_key(&state.queue_source);
+
+        self.screen = match state.screen.as_str() {
+            "liked" => Screen::Liked,
+            "search" => Screen::Search,
+            "playlists" => Screen::Playlists,
+            "playlist" => Screen::Playlist,
+            "artist" => Screen::Artist,
+            "album" => Screen::Album,
+            "track" => Screen::Track,
+            "wave" => Screen::Wave,
+            _ => Screen::Profile,
+        };
+        if self.screen == Screen::Track && state.track_id.is_none() {
+            self.screen = Screen::Profile;
+        }
+
+        self.queue_open = state.queue_open && !self.queue.is_empty();
+
+        let restored_position = Duration::from_millis(state.position_ms);
+        let track_id = state.track_id.clone();
+        let known = track_id.as_ref().and_then(|id| {
+            self.profile
+                .as_ref()
+                .and_then(|profile| profile.sample.iter().find(|track| &track.id == id).cloned())
+        });
+
+        if let Some(track) = known {
+            self.apply_restored_track(track, restored_position, state.quality.clone(), cx);
+        } else if let (Some(track_id), false) = (track_id, self.demo) {
+            let client = self.client.clone();
+            let epoch = self.profile_epoch;
+            let quality = state.quality.clone();
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let result = cx
+                    .background_spawn(async move { client.track(&track_id) })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if this.profile_epoch != epoch {
+                        return;
+                    }
+                    if let Ok(track) = result {
+                        if !this.queue_track_cache.contains_key(&track.id) {
+                            this.cache_track(&track);
+                        }
+                        let existing = this.covers.get(&track.id).cloned();
+                        this.player.track = Some(track.clone());
+                        this.player.cover = existing;
+                        this.player.position = restored_position.min(track.duration());
+                        this.player.playing = false;
+                        this.player.loading = false;
+                        this.player.audio_ready = false;
+                        this.player.quality = quality;
+                        this.player.error = None;
+                        this.load_covers(vec![track], cx);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
+
+        if self.screen == Screen::Playlist {
+            let parsed = state.playlist_id.as_deref().and_then(|id| {
+                let (uid, kind) = id.split_once(':')?;
+                Some((uid.parse::<u64>().ok()?, kind.parse::<u64>().ok()?))
+            });
+            if let Some((uid, kind)) = parsed {
+                self.nav_stack.clear();
+                self.nav_stack.push(Screen::Playlists);
+                self.open_playlist(
+                    Playlist {
+                        uid: Some(uid),
+                        kind: Some(kind),
+                        ..Playlist::default()
+                    },
+                    cx,
+                );
+            } else {
+                self.screen = Screen::Playlists;
+                self.load_playlists(cx);
+            }
+        } else if self.screen == Screen::Artist {
+            if let Some(id) = state.artist_id {
+                self.artist = ArtistState {
+                    id: Some(id),
+                    loading: true,
+                    epoch: self.artist.epoch.wrapping_add(1),
+                    ..ArtistState::default()
+                };
+                self.load_artist_data(id, None, cx);
+            } else {
+                self.screen = Screen::Profile;
+            }
+        } else if self.screen == Screen::Album {
+            if let Some(id) = state.album_id {
+                self.album = AlbumState {
+                    id: Some(id),
+                    loading: true,
+                    epoch: self.album.epoch.wrapping_add(1),
+                    ..AlbumState::default()
+                };
+                self.load_album_data(id, None, cx);
+            } else {
+                self.screen = Screen::Profile;
+            }
+        } else if self.screen == Screen::Wave {
+            self.load_wave(false, false, cx);
+        } else if self.screen == Screen::Search && !state.search_query.is_empty() {
+            self.run_search(state.search_query.clone(), 0, cx);
+        } else if self.screen == Screen::Playlists {
+            self.load_playlists(cx);
+        }
+
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
+        cx.notify();
+    }
+
+    fn apply_restored_track(
+        &mut self,
+        track: Track,
+        position: Duration,
+        quality: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.cache_track(&track);
+        self.player.track = Some(track.clone());
+        self.player.cover = self.covers.get(&track.id).cloned();
+        self.player.position = position.min(track.duration());
+        self.player.playing = false;
+        self.player.loading = false;
+        self.player.audio_ready = false;
+        self.player.quality = quality;
+        self.player.error = None;
+        self.load_covers(vec![track], cx);
+        cx.notify();
+    }
+
+    // ------------------------------------------------------------------- Wave
+
+    pub(crate) fn open_wave(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.screen = Screen::Wave;
+        self.nav_stack.clear();
+        self.queue_open = false;
+        if !self.wave.loaded && !self.wave.loading {
+            self.load_wave(false, false, cx);
+        }
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    fn load_wave(&mut self, append: bool, autoplay: bool, cx: &mut Context<Self>) {
+        if self.wave.loading || self.wave.fetching {
+            return;
+        }
+        self.wave.epoch = self.wave.epoch.wrapping_add(1);
+        let epoch = self.wave.epoch;
+        let append = append && !self.wave.tracks.is_empty();
+        let old_queue_len = self.queue.len();
+        self.wave.error = None;
+        if append {
+            self.wave.fetching = true;
+        } else {
+            self.wave.loading = true;
+        }
+        cx.notify();
+
+        if self.demo {
+            let sample = self
+                .profile
+                .as_ref()
+                .map(|profile| profile.sample.clone())
+                .unwrap_or_default();
+            let incoming: Vec<Track> = if append {
+                sample.iter().rev().cloned().collect()
+            } else {
+                sample.clone()
+            };
+            if incoming.is_empty() {
+                self.wave.loading = false;
+                self.wave.fetching = false;
+                self.wave.error = Some("Демо-коллекция пуста.".into());
+                cx.notify();
+                return;
+            }
+            if append {
+                self.wave.tracks.extend(incoming.clone());
+            } else {
+                self.wave.tracks = incoming.clone();
+            }
+            self.wave.loaded = true;
+            self.wave.loading = false;
+            self.wave.fetching = false;
+            self.load_covers(incoming.clone(), cx);
+
+            if autoplay {
+                if append {
+                    for track in &incoming {
+                        self.cache_track(track);
+                        self.queue.push(track.full_id());
+                    }
+                    self.queue_source = QueueSource::Wave;
+                    self.play_queue_index(old_queue_len, cx);
+                } else {
+                    self.start_wave_queue(0, cx);
+                }
+            }
+            self.schedule_state_save(cx);
+            cx.notify();
+            return;
+        }
+
+        let queue = if append {
+            self.wave
+                .tracks
+                .last()
+                .map(|track| track.id.clone())
+                .or_else(|| {
+                    self.queue
+                        .last()
+                        .map(|id| id.split(':').next().unwrap_or(id).to_string())
+                })
+        } else {
+            None
+        };
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.wave_tracks(queue.as_deref()) })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.wave.epoch != epoch {
+                    return;
+                }
+                this.wave.loading = false;
+                this.wave.fetching = false;
+                match result {
+                    Ok(batch) => {
+                        let incoming = batch.tracks();
+                        if incoming.is_empty() {
+                            this.wave.error =
+                                Some("Волна не вернула треки. Попробуйте ещё раз.".into());
+                        } else {
+                            this.wave.loaded = true;
+                            this.wave.error = None;
+                            if append {
+                                for track in &incoming {
+                                    this.cache_track(track);
+                                    this.queue.push(track.full_id());
+                                }
+                                this.wave.tracks.extend(incoming.clone());
+                                if autoplay {
+                                    this.queue_source = QueueSource::Wave;
+                                    this.play_queue_index(old_queue_len, cx);
+                                }
+                            } else {
+                                this.wave.tracks = incoming.clone();
+                                if autoplay {
+                                    this.start_wave_queue(0, cx);
+                                }
+                            }
+                            this.load_covers(incoming, cx);
+                        }
+                    }
+                    Err(error) => {
+                        this.wave.error = Some(error_text(&error));
+                        if autoplay {
+                            this.player.error = Some(error_text(&error));
+                        }
+                    }
+                }
+                this.schedule_state_save(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn start_wave_queue(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.wave.tracks.is_empty() {
+            return;
+        }
+        let tracks = self.wave.tracks.clone();
+        for track in &tracks {
+            self.cache_track(track);
+        }
+        self.queue_source = QueueSource::Wave;
+        self.queue = tracks.iter().map(Track::full_id).collect();
+        self.queue_index = None;
+        self.play_queue_index(index.min(self.queue.len().saturating_sub(1)), cx);
+        self.schedule_state_save(cx);
+    }
+
+    pub(crate) fn play_wave(&mut self, cx: &mut Context<Self>) {
+        if self.wave.tracks.is_empty() {
+            self.load_wave(false, true, cx);
+        } else {
+            self.start_wave_queue(0, cx);
+        }
+    }
+
+    pub(crate) fn shuffle_wave(&mut self, cx: &mut Context<Self>) {
+        if self.wave.tracks.is_empty() {
+            self.load_wave(false, true, cx);
+            return;
+        }
+        let index = rand::rng().random_range(0..self.wave.tracks.len());
+        self.start_wave_queue(index, cx);
+    }
+
+    pub(crate) fn wave_more(&mut self, cx: &mut Context<Self>) {
+        self.load_wave(true, false, cx);
+    }
+
+    pub(crate) fn play_wave_track(
+        &mut self,
+        track: Track,
+        tracks: Vec<Track>,
+        cx: &mut Context<Self>,
+    ) {
+        if tracks.is_empty() {
+            return;
+        }
+        for item in &tracks {
+            self.cache_track(item);
+        }
+        self.queue_source = QueueSource::Wave;
+        self.queue = tracks.iter().map(Track::full_id).collect();
+        let index = tracks
+            .iter()
+            .position(|item| item.id == track.id)
+            .unwrap_or(0);
+        self.play_queue_index(index, cx);
+        self.schedule_state_save(cx);
+    }
+
+    // --------------------------------------------------------- Artist / Album
+
+    fn push_navigation(&mut self) {
+        if !matches!(
+            self.screen,
+            Screen::Login | Screen::Loading | Screen::LoadError(_)
+        ) {
+            self.nav_stack.push(self.screen.clone());
+        }
+    }
+
+    pub(crate) fn navigate_back(&mut self, cx: &mut Context<Self>) {
+        self.screen = self.nav_stack.pop().unwrap_or(Screen::Profile);
+        self.queue_open = false;
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn open_track_page(&mut self, cx: &mut Context<Self>) {
+        if self.player.track.is_none() || matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.push_navigation();
+        self.screen = Screen::Track;
+        self.queue_open = false;
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn open_artist(
+        &mut self,
+        artist_id: u64,
+        known: Option<Artist>,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.push_navigation();
+        self.screen = Screen::Artist;
+        self.artist = ArtistState {
+            id: Some(artist_id),
+            artist: known.clone(),
+            loading: true,
+            epoch: self.artist.epoch.wrapping_add(1),
+            ..ArtistState::default()
+        };
+        self.schedule_state_save(cx);
+        self.load_artist_data(artist_id, known, cx);
+        cx.notify();
+    }
+
+    fn load_artist_data(&mut self, artist_id: u64, known: Option<Artist>, cx: &mut Context<Self>) {
+        let epoch = self.artist.epoch;
+
+        if self.demo {
+            let sample = self
+                .profile
+                .as_ref()
+                .map(|profile| profile.sample.clone())
+                .unwrap_or_default();
+            let mut tracks = Vec::new();
+            let mut albums = Vec::new();
+            let mut seen_albums = HashSet::new();
+            for track in &sample {
+                if track
+                    .artists
+                    .iter()
+                    .any(|artist| artist.id == Some(artist_id))
+                {
+                    tracks.push(track.clone());
+                    for album in &track.albums {
+                        if album.id.is_some_and(|id| seen_albums.insert(id)) {
+                            let mut album = album.clone();
+                            album.artists = track.artists.clone();
+                            albums.push(album);
+                        }
+                    }
+                }
+            }
+            let artist = known
+                .or_else(|| {
+                    tracks
+                        .iter()
+                        .flat_map(|track| track.artists.iter())
+                        .find(|artist| artist.id == Some(artist_id))
+                        .cloned()
+                })
+                .or_else(|| self.artist.artist.clone());
+            self.artist.artist = artist;
+            self.artist.tracks = tracks.clone();
+            self.artist.albums = albums;
+            self.artist.loading = false;
+            self.artist.error = if self.artist.artist.is_none() {
+                Some("Артист не найден в демо-коллекции.".into())
+            } else {
+                None
+            };
+            self.load_covers(tracks, cx);
+            return;
+        }
+
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let artist = client.artist(artist_id)?;
+                    let tracks = client.artist_tracks(artist_id, 0, 50)?;
+                    let albums = client.artist_albums(artist_id, 0, 50)?;
+                    Ok::<_, MusicError>((artist, tracks.tracks, albums.albums))
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.artist.epoch != epoch {
+                    return;
+                }
+                this.artist.loading = false;
+                match result {
+                    Ok((artist, tracks, albums)) => {
+                        this.artist.artist = Some(artist.clone());
+                        this.artist.tracks = tracks.clone();
+                        this.artist.albums = albums.clone();
+                        this.artist.error = None;
+                        this.load_covers(tracks, cx);
+                        this.load_entity_images(
+                            artist
+                                .cover_url(600)
+                                .map(|url| (format!("artist-{artist_id}"), url)),
+                            albums
+                                .iter()
+                                .filter_map(|album| {
+                                    album.id.and_then(|id| {
+                                        album.cover_url(400).map(|url| (format!("album-{id}"), url))
+                                    })
+                                })
+                                .collect(),
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        this.artist.error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn open_album(
+        &mut self,
+        album_id: u64,
+        known: Option<Album>,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.push_navigation();
+        self.screen = Screen::Album;
+        self.album = AlbumState {
+            id: Some(album_id),
+            album: known.clone(),
+            loading: true,
+            epoch: self.album.epoch.wrapping_add(1),
+            ..AlbumState::default()
+        };
+        self.schedule_state_save(cx);
+        self.load_album_data(album_id, known, cx);
+        cx.notify();
+    }
+
+    fn load_album_data(&mut self, album_id: u64, known: Option<Album>, cx: &mut Context<Self>) {
+        let epoch = self.album.epoch;
+
+        if self.demo {
+            let sample = self
+                .profile
+                .as_ref()
+                .map(|profile| profile.sample.clone())
+                .unwrap_or_default();
+            let tracks: Vec<Track> = sample
+                .iter()
+                .filter(|track| track.albums.iter().any(|album| album.id == Some(album_id)))
+                .cloned()
+                .collect();
+            let mut album = known.or_else(|| self.album.album.clone());
+            if album.is_none()
+                && let Some(track) = tracks.first()
+                && let Some(base) = track.albums.first()
+            {
+                let mut value = base.clone();
+                value.artists = track.artists.clone();
+                album = Some(value);
+            }
+            if let Some(album) = &mut album {
+                album.volumes = vec![tracks.clone()];
+            }
+            self.album.album = album;
+            self.album.tracks = tracks.clone();
+            self.album.loading = false;
+            self.album.error = if self.album.album.is_none() {
+                Some("Альбом не найден в демо-коллекции.".into())
+            } else {
+                None
+            };
+            self.load_covers(tracks, cx);
+            return;
+        }
+
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.album_with_tracks(album_id) })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.album.epoch != epoch {
+                    return;
+                }
+                this.album.loading = false;
+                match result {
+                    Ok(album) => {
+                        let tracks = album.all_tracks();
+                        this.album.album = Some(album.clone());
+                        this.album.tracks = tracks.clone();
+                        this.album.error = None;
+                        this.load_covers(tracks, cx);
+                        this.load_entity_images(
+                            album
+                                .cover_url(600)
+                                .map(|url| (format!("album-{album_id}"), url)),
+                            Vec::new(),
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        this.album.error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn load_entity_images(
+        &mut self,
+        single: Option<(String, String)>,
+        many: Vec<(String, String)>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut covers = Vec::new();
+        if let Some(cover) = single {
+            covers.push(cover);
+        }
+        covers.extend(many);
+        if covers.is_empty() {
+            return;
+        }
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            for (key, url) in covers {
+                let already = this
+                    .update(cx, |this, _| this.search_images.contains_key(&key))
+                    .unwrap_or(true);
+                if already {
+                    continue;
+                }
+                let client = client.clone();
+                let bytes = cx
+                    .background_spawn(async move { client.download_image(&url).ok() })
+                    .await;
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+                let Some(image) = decode_image(bytes) else {
+                    continue;
+                };
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.profile_epoch != epoch {
+                            return false;
+                        }
+                        this.search_images.insert(key, image);
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn play_context_track(
+        &mut self,
+        track: Track,
+        tracks: Vec<Track>,
+        cx: &mut Context<Self>,
+    ) {
+        if tracks.is_empty() {
+            return;
+        }
+        for item in &tracks {
+            self.cache_track(item);
+        }
+        self.queue_source = QueueSource::Artist;
+        self.queue = tracks.iter().map(Track::full_id).collect();
+        self.queue_index = tracks.iter().position(|item| item.id == track.id);
+        let index = self.queue_index.unwrap_or_else(|| {
+            tracks
+                .iter()
+                .position(|item| item.id == track.id)
+                .unwrap_or(0)
+        });
+        self.play_queue_index(index, cx);
+        self.schedule_state_save(cx);
+    }
+
+    pub(crate) fn play_context_all(
+        &mut self,
+        tracks: Vec<Track>,
+        shuffle: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if tracks.is_empty() {
+            self.player.error = Some("Здесь нет треков.".into());
+            cx.notify();
+            return;
+        }
+        for item in &tracks {
+            self.cache_track(item);
+        }
+        self.queue_source = QueueSource::Artist;
+        self.queue = tracks.iter().map(Track::full_id).collect();
+        self.queue_index = None;
+        let index = if shuffle {
+            rand::rng().random_range(0..tracks.len())
+        } else {
+            0
+        };
+        self.play_queue_index(index, cx);
+        self.schedule_state_save(cx);
+    }
+
     // ---------------------------------------------------------------- Playlists
 
     fn reset_playlists(&mut self) {
@@ -1223,9 +2099,11 @@ impl RootView {
 
     pub(crate) fn open_playlists(&mut self, cx: &mut Context<Self>) {
         self.screen = Screen::Playlists;
+        self.nav_stack.clear();
         if !self.playlists.loaded && !self.playlists.loading {
             self.load_playlists(cx);
         }
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -1332,6 +2210,7 @@ impl RootView {
         self.playlists.selected = None;
         self.playlists.tracks.clear();
         self.playlists.detail_epoch = self.playlists.detail_epoch.wrapping_add(1);
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -1343,6 +2222,7 @@ impl RootView {
         self.playlists.tracks_error = None;
         self.playlists.detail_epoch = self.playlists.detail_epoch.wrapping_add(1);
         let epoch = self.playlists.detail_epoch;
+        self.schedule_state_save(cx);
         cx.notify();
 
         if self.demo {
@@ -1445,6 +2325,7 @@ impl RootView {
         for item in &tracks {
             self.cache_track(item);
         }
+        self.queue_source = QueueSource::Playlist;
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = tracks.iter().position(|item| item.id == track.id);
 
@@ -1466,6 +2347,7 @@ impl RootView {
         for item in &tracks {
             self.cache_track(item);
         }
+        self.queue_source = QueueSource::Playlist;
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = None;
         self.play_queue_index(0, cx);
@@ -1481,6 +2363,7 @@ impl RootView {
         for item in &tracks {
             self.cache_track(item);
         }
+        self.queue_source = QueueSource::Playlist;
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = None;
         let index = rand::rng().random_range(0..tracks.len());
@@ -1497,11 +2380,13 @@ impl RootView {
         if self.queue_open {
             self.fetch_queue_tracks(cx);
         }
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
     pub(crate) fn close_queue(&mut self, cx: &mut Context<Self>) {
         self.queue_open = false;
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -1590,6 +2475,7 @@ impl RootView {
             return true;
         }
 
+        self.queue_source = QueueSource::Liked;
         if let Some(profile) = self.profile.as_ref() {
             self.queue = if self.demo {
                 profile
@@ -1659,12 +2545,37 @@ impl RootView {
         self.load_and_play(known, id, cx);
     }
 
+    fn set_liked_queue(&mut self) {
+        self.queue_source = QueueSource::Liked;
+        let mut known = Vec::new();
+        self.queue = self
+            .profile
+            .as_ref()
+            .map(|profile| {
+                known = profile.sample.clone();
+                if self.demo {
+                    profile
+                        .sample
+                        .iter()
+                        .map(|track| track.id.clone())
+                        .collect()
+                } else {
+                    profile.liked.iter().map(TrackShort::track_id).collect()
+                }
+            })
+            .unwrap_or_default();
+        for track in &known {
+            self.cache_track(track);
+        }
+    }
+
     pub(crate) fn play_random(&mut self, cx: &mut Context<Self>) {
         if self.player.loading {
             return;
         }
 
-        if !self.ensure_queue() {
+        self.set_liked_queue();
+        if self.queue.is_empty() {
             self.queue_empty_error(cx);
             return;
         }
@@ -1679,6 +2590,17 @@ impl RootView {
     pub(crate) fn play_next(&mut self, cx: &mut Context<Self>) {
         if !self.ensure_queue() {
             self.queue_empty_error(cx);
+            return;
+        }
+
+        if self.queue_source == QueueSource::Wave
+            && self
+                .queue_index
+                .is_some_and(|index| index + 1 >= self.queue.len())
+            && !self.wave.loading
+            && !self.wave.fetching
+        {
+            self.load_wave(true, true, cx);
             return;
         }
 
@@ -1704,6 +2626,7 @@ impl RootView {
 
     pub(crate) fn play_track(&mut self, track: Track, cx: &mut Context<Self>) {
         self.cache_track(&track);
+        self.queue_source = QueueSource::Liked;
         let same_track = self
             .player
             .track
@@ -1715,7 +2638,7 @@ impl RootView {
             return;
         }
 
-        self.ensure_queue();
+        self.set_liked_queue();
         let full_id = track.full_id();
         self.queue_index = self
             .queue
@@ -1736,6 +2659,16 @@ impl RootView {
         requested_id: String,
         cx: &mut Context<Self>,
     ) {
+        self.load_and_play_at(track, requested_id, Duration::ZERO, cx);
+    }
+
+    fn load_and_play_at(
+        &mut self,
+        track: Option<Track>,
+        requested_id: String,
+        start_at: Duration,
+        cx: &mut Context<Self>,
+    ) {
         if self.client.token().is_none() {
             self.player.error = Some("Нужно войти в аккаунт.".into());
             cx.notify();
@@ -1751,11 +2684,12 @@ impl RootView {
             self.player.track = Some(track.clone());
             self.player.cover = self.covers.get(&track.id).cloned();
         }
-        self.player.position = Duration::ZERO;
+        self.player.position = start_at;
         self.player.playing = false;
         self.player.loading = true;
         self.player.error = None;
         self.player.quality = None;
+        self.player.audio_ready = false;
         cx.notify();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
@@ -1789,7 +2723,7 @@ impl RootView {
 
                         this.cache_track(&track);
                         this.player.track = Some(track.clone());
-                        this.player.position = Duration::ZERO;
+                        this.player.position = start_at.min(track.duration());
                         this.player.quality = Some(
                             if downloaded.codec.to_ascii_lowercase().starts_with("flac") {
                                 "FLAC · Lossless".to_string()
@@ -1805,10 +2739,20 @@ impl RootView {
 
                         match this.audio.load(downloaded.bytes) {
                             Ok(()) => {
+                                let target = start_at.min(track.duration());
+                                if !target.is_zero() {
+                                    if let Err(error) = this.audio.seek(target) {
+                                        this.player.error = Some(error);
+                                    } else {
+                                        this.player.position = target;
+                                    }
+                                }
+                                this.player.audio_ready = true;
                                 this.player.playing = true;
                             }
                             Err(error) => {
                                 this.player.playing = false;
+                                this.player.audio_ready = false;
                                 this.player.error = Some(error);
                             }
                         }
@@ -1819,6 +2763,7 @@ impl RootView {
                     }
                 }
 
+                this.schedule_state_save(cx);
                 cx.notify();
             })
             .ok();
@@ -1867,6 +2812,12 @@ impl RootView {
             return;
         }
 
+        if !self.player.audio_ready {
+            self.player.position = target;
+            cx.notify();
+            return;
+        }
+
         match self.audio.seek(target) {
             Ok(()) => {
                 self.player.position = target;
@@ -1876,6 +2827,7 @@ impl RootView {
                 self.player.error = Some(error);
             }
         }
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -1910,6 +2862,13 @@ impl RootView {
             return;
         };
 
+        if !self.player.audio_ready {
+            let start_at = self.player.position;
+            let id = track.full_id();
+            self.load_and_play_at(Some(track), id, start_at, cx);
+            return;
+        }
+
         if self.player.playing {
             self.audio.pause();
             self.player.playing = false;
@@ -1942,6 +2901,7 @@ impl Drop for RootView {
         // A resize might happen immediately before the window is closed; make
         // sure the latest size is not lost.
         let _ = config::save_window_size(self.viewport_width, self.viewport_height);
+        self.save_state_now();
     }
 }
 

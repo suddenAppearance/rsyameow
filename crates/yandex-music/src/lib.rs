@@ -73,6 +73,7 @@ pub use download::{
 };
 pub use error::{Error, Result};
 pub use models::{
-    Account, Album, Artist, Cover, Permissions, Playlist, Plus, SearchResult, Status, Subscription,
-    Track, TrackShort, TracksList, User,
+    Account, Album, Artist, ArtistAlbums, ArtistCounts, ArtistTracks, Cover, Pager, Permissions,
+    Playlist, Plus, SearchResult, Status, Subscription, Track, TrackShort, TracksList, User,
+    WaveBatch, WaveSequence,
 };

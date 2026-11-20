@@ -8,7 +8,10 @@ use crate::download::{
     file_info_sign, select_best_mp3,
 };
 use crate::http::Transport;
-use crate::models::{Album, Artist, Playlist, SearchResult, Status, Track, TracksList};
+use crate::models::{
+    Album, Artist, ArtistAlbums, ArtistTracks, Playlist, SearchResult, Status, Track, TracksList,
+    WaveBatch,
+};
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -511,6 +514,76 @@ impl Client {
 
         let response: LikesResponse = self.inner.http.get(&url, &query, Some(&token))?;
         Ok(response.library.unwrap_or_default())
+    }
+
+    // ------------------------------------------------------------------- Wave
+
+    /// A batch of tracks from a rotor station. `queue` is the id of the last
+    /// played track and asks the station to continue from it.
+    pub fn rotor_station_tracks(&self, station: &str, queue: Option<&str>) -> Result<WaveBatch> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/rotor/station/{station}/tracks"));
+        let mut query = vec![("settings2", "true".to_string())];
+        if let Some(queue) = queue.filter(|queue| !queue.is_empty()) {
+            query.push(("queue", queue.to_string()));
+        }
+
+        let batch: Option<WaveBatch> = self.inner.http.get(&url, &query, Some(&token))?;
+        batch.ok_or_else(|| Error::NotFound(format!("station {station}")))
+    }
+
+    /// A batch of "Моя волна" (`user:onyourwave`).
+    pub fn wave_tracks(&self, queue: Option<&str>) -> Result<WaveBatch> {
+        self.rotor_station_tracks("user:onyourwave", queue)
+    }
+
+    // ---------------------------------------------------------- Artist / Album
+
+    /// Artist information from the brief-info endpoint.
+    pub fn artist(&self, artist_id: u64) -> Result<Artist> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/artists/{artist_id}/brief-info"));
+
+        #[derive(Deserialize)]
+        struct BriefInfo {
+            #[serde(default)]
+            artist: Option<Artist>,
+        }
+
+        let info: BriefInfo = self.inner.http.get(&url, &[], Some(&token))?;
+        info.artist
+            .ok_or_else(|| Error::NotFound(format!("artist {artist_id}")))
+    }
+
+    /// A page of an artist's tracks.
+    pub fn artist_tracks(&self, artist_id: u64, page: u32, page_size: u32) -> Result<ArtistTracks> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/artists/{artist_id}/tracks"));
+        let query = [
+            ("page", page.to_string()),
+            ("page-size", page_size.to_string()),
+        ];
+        self.inner.http.get(&url, &query, Some(&token))
+    }
+
+    /// A page of an artist's direct albums.
+    pub fn artist_albums(&self, artist_id: u64, page: u32, page_size: u32) -> Result<ArtistAlbums> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/artists/{artist_id}/direct-albums"));
+        let query = [
+            ("sort-by", "year".to_string()),
+            ("page", page.to_string()),
+            ("page-size", page_size.to_string()),
+        ];
+        self.inner.http.get(&url, &query, Some(&token))
+    }
+
+    /// An album with its tracks grouped into volumes.
+    pub fn album_with_tracks(&self, album_id: u64) -> Result<Album> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/albums/{album_id}/with-tracks"));
+        let album: Option<Album> = self.inner.http.get(&url, &[], Some(&token))?;
+        album.ok_or_else(|| Error::NotFound(format!("album {album_id}")))
     }
 
     // ------------------------------------------------------------- Download

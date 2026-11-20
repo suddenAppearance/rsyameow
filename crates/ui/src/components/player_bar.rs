@@ -30,6 +30,7 @@ pub struct PlayerBar {
     queue_open: bool,
     on_like: Option<ClickHandler>,
     on_queue: Option<ClickHandler>,
+    on_track: Option<ClickHandler>,
     on_mute: Option<ClickHandler>,
     on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
@@ -57,6 +58,7 @@ impl PlayerBar {
             queue_open: false,
             on_like: None,
             on_queue: None,
+            on_track: None,
             on_mute: None,
             on_volume: None,
             on_toggle: None,
@@ -147,6 +149,14 @@ impl PlayerBar {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_queue = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_track(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_track = Some(Box::new(handler));
         self
     }
 
@@ -288,7 +298,8 @@ impl RenderOnce for PlayerBar {
             );
         }
 
-        let left = gpui::div()
+        let mut left = gpui::div()
+            .id("player-track-info")
             .flex()
             .items_center()
             .gap(px(space::MD))
@@ -304,6 +315,14 @@ impl RenderOnce for PlayerBar {
                     .child(cover_content),
             )
             .child(left_meta);
+
+        if has_track && let Some(handler) = self.on_track {
+            left = left
+                .cursor_pointer()
+                .rounded(px(8.0))
+                .hover(|style| style.opacity(0.82))
+                .on_click(handler);
+        }
 
         let mut toggle = IconButton::new(
             "player-toggle",

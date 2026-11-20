@@ -9,6 +9,7 @@ const CONFIG_DIR: &str = "rsyameow";
 const SESSION_FILE: &str = "session.json";
 const WINDOW_FILE: &str = "window.json";
 const PLAYBACK_FILE: &str = "playback.json";
+const STATE_FILE: &str = "state.json";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Session {
@@ -26,6 +27,45 @@ struct WindowSize {
 #[derive(Debug, Serialize, Deserialize)]
 struct PlaybackSettings {
     volume: f32,
+}
+
+/// UI and playback state restored on the next launch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AppState {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub demo: bool,
+    #[serde(default)]
+    pub uid: Option<u64>,
+    /// Stable screen key: profile, liked, search, playlists, playlist, wave,
+    /// artist, album or track.
+    #[serde(default)]
+    pub screen: String,
+    #[serde(default)]
+    pub search_query: String,
+    #[serde(default)]
+    pub search_kind: String,
+    #[serde(default)]
+    pub queue: Vec<String>,
+    #[serde(default)]
+    pub queue_index: Option<usize>,
+    #[serde(default)]
+    pub track_id: Option<String>,
+    #[serde(default)]
+    pub position_ms: u64,
+    #[serde(default)]
+    pub quality: Option<String>,
+    #[serde(default)]
+    pub queue_open: bool,
+    #[serde(default)]
+    pub queue_source: String,
+    #[serde(default)]
+    pub playlist_id: Option<String>,
+    #[serde(default)]
+    pub artist_id: Option<u64>,
+    #[serde(default)]
+    pub album_id: Option<u64>,
 }
 
 /// Returns the directory used for the session file.
@@ -132,6 +172,32 @@ pub fn save_volume(volume: f32) -> io::Result<()> {
     fs::write(dir.join(PLAYBACK_FILE), data)
 }
 
+/// Load the last saved UI/playback state. Missing or malformed files are ignored.
+pub fn load_app_state() -> Option<AppState> {
+    let path = config_dir()?.join(STATE_FILE);
+    let data = fs::read_to_string(path).ok()?;
+    let state: AppState = serde_json::from_str(&data).ok()?;
+    if state.version == 1 {
+        Some(state)
+    } else {
+        None
+    }
+}
+
+/// Persist UI and playback state for the next launch.
+pub fn save_app_state(state: &AppState) -> io::Result<()> {
+    let dir = ensure_config_dir()?;
+    let data = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
+    write_private(&dir.join(STATE_FILE), &data)
+}
+
+/// Remove the saved UI/playback state.
+pub fn clear_app_state() {
+    if let Some(path) = config_dir().map(|dir| dir.join(STATE_FILE)) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 fn ensure_config_dir() -> io::Result<PathBuf> {
     let dir = config_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "config directory is unknown"))?;
@@ -223,6 +289,30 @@ mod tests {
 
         save_volume(0.42).unwrap();
         assert_eq!(load_volume(), Some(0.42));
+
+        let state = AppState {
+            version: 1,
+            demo: true,
+            uid: Some(42),
+            screen: "liked".into(),
+            search_query: "кот".into(),
+            search_kind: "artists".into(),
+            queue: vec!["1".into(), "2:3".into()],
+            queue_index: Some(1),
+            track_id: Some("2".into()),
+            position_ms: 12_345,
+            quality: Some("FLAC · Lossless".into()),
+            queue_open: true,
+            ..Default::default()
+        };
+        save_app_state(&state).unwrap();
+        let loaded = load_app_state().expect("state");
+        assert_eq!(loaded.screen, "liked");
+        assert_eq!(loaded.queue, vec!["1", "2:3"]);
+        assert_eq!(loaded.position_ms, 12_345);
+
+        clear_app_state();
+        assert!(load_app_state().is_none());
 
         clear_token();
         assert_eq!(load_token(), None);

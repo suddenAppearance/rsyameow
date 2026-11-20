@@ -659,3 +659,148 @@ fn file_info_is_signed_and_lossless_download_is_preferred() {
     assert!(downloaded.bytes.starts_with(b"\x00\x00\x00\x1cftyp"));
     assert!(downloaded.direct_url.ends_with("/audio/song.m4a"));
 }
+
+#[test]
+fn artist_and_album_pages_are_parsed() {
+    let server = TestServer::start(|request| {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/artists/9262/brief-info") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "artist": {
+                            "id": 9262,
+                            "name": "Nirvana",
+                            "genres": ["rock", "alternative"],
+                            "likesCount": 12345,
+                            "counts": {"tracks": 112, "directAlbums": 33},
+                            "cover": {"uri": "avatars.yandex.net/get-music-content/1/%%"}
+                        }
+                    }
+                }),
+            ),
+            ("GET", "/artists/9262/tracks") => {
+                assert_eq!(request.query_value("page"), Some("0"));
+                assert_eq!(request.query_value("page-size"), Some("50"));
+                MockResponse::json(
+                    200,
+                    json!({
+                        "result": {
+                            "tracks": [
+                                {"id": 101, "title": "Come As You Are", "durationMs": 219000},
+                                {"id": 102, "title": "Lithium", "durationMs": 257000}
+                            ],
+                            "pager": {"page": 0, "perPage": 50, "total": 112}
+                        }
+                    }),
+                )
+            }
+            ("GET", "/artists/9262/direct-albums") => {
+                assert_eq!(request.query_value("sort-by"), Some("year"));
+                MockResponse::json(
+                    200,
+                    json!({
+                        "result": {
+                            "albums": [
+                                {"id": 5576245, "title": "Nevermind", "year": 1991, "trackCount": 12}
+                            ],
+                            "pager": {"page": 0, "perPage": 50, "total": 33}
+                        }
+                    }),
+                )
+            }
+            ("GET", "/albums/5576245/with-tracks") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "id": 5576245,
+                        "title": "Nevermind",
+                        "year": 1991,
+                        "trackCount": 2,
+                        "artists": [{"id": 9262, "name": "Nirvana"}],
+                        "volumes": [[
+                            {"id": 201, "title": "Smells Like Teen Spirit", "durationMs": 301000},
+                            {"id": 202, "title": "In Bloom", "durationMs": 254000}
+                        ]]
+                    }
+                }),
+            ),
+            other => panic!("unexpected request: {other:?}"),
+        }
+    });
+
+    let client = client_for(&server, Some("test-token"));
+
+    let artist = client.artist(9262).unwrap();
+    assert_eq!(artist.display_name(), "Nirvana");
+    assert_eq!(artist.likes_count, Some(12345));
+    assert_eq!(
+        artist.counts.as_ref().map(|counts| counts.tracks),
+        Some(112)
+    );
+    assert_eq!(
+        artist.cover_url(300).as_deref(),
+        Some("https://avatars.yandex.net/get-music-content/1/300x300")
+    );
+
+    let tracks = client.artist_tracks(9262, 0, 50).unwrap();
+    assert_eq!(tracks.tracks.len(), 2);
+    assert_eq!(tracks.pager.as_ref().map(|pager| pager.total), Some(112));
+
+    let albums = client.artist_albums(9262, 0, 50).unwrap();
+    assert_eq!(albums.albums[0].display_title(), "Nevermind");
+    assert_eq!(albums.pager.as_ref().map(|pager| pager.total), Some(33));
+
+    let album = client.album_with_tracks(5576245).unwrap();
+    assert_eq!(album.display_title(), "Nevermind");
+    assert_eq!(album.artist_names(), "Nirvana");
+    let album_tracks = album.all_tracks();
+    assert_eq!(album_tracks.len(), 2);
+    assert_eq!(album_tracks[1].display_title(), "In Bloom");
+    assert_eq!(album.duration(), Duration::from_secs(555));
+}
+
+#[test]
+fn wave_station_returns_tracks_and_continues_from_queue() {
+    let server = TestServer::start(|request| {
+        assert_eq!(request.method, "GET", "wave endpoint must use GET");
+        assert_eq!(request.path, "/rotor/station/user:onyourwave/tracks");
+        assert_eq!(request.query_value("settings2"), Some("true"));
+        match request.query_value("queue") {
+            None => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "batchId": "batch-1",
+                        "radioSessionId": "session-1",
+                        "sequence": [
+                            {"type": "track", "liked": false, "track": {"id": 1, "title": "One"}},
+                            {"type": "track", "liked": true, "track": {"id": 2, "title": "Two"}}
+                        ]
+                    }
+                }),
+            ),
+            Some("2") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "batchId": "batch-2",
+                        "sequence": [
+                            {"type": "track", "liked": false, "track": {"id": 3, "title": "Three"}}
+                        ]
+                    }
+                }),
+            ),
+            other => panic!("unexpected queue: {other:?}"),
+        }
+    });
+
+    let client = client_for(&server, Some("test-token"));
+    let first = client.wave_tracks(None).unwrap();
+    assert_eq!(first.batch_id.as_deref(), Some("batch-1"));
+    assert_eq!(first.tracks().len(), 2);
+    assert_eq!(first.tracks()[1].display_title(), "Two");
+
+    let next = client.wave_tracks(Some("2")).unwrap();
+    assert_eq!(next.tracks()[0].display_title(), "Three");
+}

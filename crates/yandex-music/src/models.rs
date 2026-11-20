@@ -214,11 +214,33 @@ pub struct Artist {
     #[serde(default)]
     pub cover: Option<Cover>,
     #[serde(default)]
+    pub og_image: Option<String>,
+    #[serde(default)]
+    pub op_image: Option<String>,
+    #[serde(default)]
     pub genres: Vec<String>,
+    #[serde(default)]
+    pub likes_count: Option<u64>,
+    #[serde(default)]
+    pub counts: Option<ArtistCounts>,
     #[serde(default)]
     pub various: Option<bool>,
     #[serde(default)]
     pub composer: Option<bool>,
+}
+
+/// Track and album counters shown on an artist page.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistCounts {
+    #[serde(default)]
+    pub tracks: u64,
+    #[serde(default)]
+    pub direct_albums: u64,
+    #[serde(default)]
+    pub also_albums: u64,
+    #[serde(default)]
+    pub also_tracks: u64,
 }
 
 impl Artist {
@@ -229,7 +251,21 @@ impl Artist {
 
     /// URL of the artist cover at the requested size.
     pub fn cover_url(&self, size: u32) -> Option<String> {
-        self.cover.as_ref().and_then(|cover| cover.url(size))
+        self.cover
+            .as_ref()
+            .and_then(|cover| cover.url(size))
+            .or_else(|| {
+                self.op_image
+                    .as_deref()
+                    .filter(|uri| !uri.is_empty())
+                    .map(|uri| cover_url(uri, size))
+            })
+            .or_else(|| {
+                self.og_image
+                    .as_deref()
+                    .filter(|uri| !uri.is_empty())
+                    .map(|uri| cover_url(uri, size))
+            })
     }
 }
 
@@ -253,6 +289,16 @@ pub struct Album {
     pub release_date: Option<String>,
     #[serde(default)]
     pub artists: Vec<Artist>,
+    #[serde(default)]
+    pub volumes: Vec<Vec<Track>>,
+    #[serde(default)]
+    pub likes_count: Option<u64>,
+    #[serde(default)]
+    pub short_description: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub pager: Option<Pager>,
 }
 
 impl Album {
@@ -278,6 +324,93 @@ impl Album {
             .filter(|uri| !uri.is_empty())
             .map(|uri| cover_url(uri, size))
     }
+
+    /// All tracks of the album across its volumes.
+    pub fn all_tracks(&self) -> Vec<Track> {
+        self.volumes.iter().flatten().cloned().collect()
+    }
+
+    /// Total duration of the album.
+    pub fn duration(&self) -> Duration {
+        Duration::from_millis(
+            self.duration_ms
+                .or_else(|| {
+                    let milliseconds = self
+                        .all_tracks()
+                        .iter()
+                        .map(|track| track.duration_ms.unwrap_or(0))
+                        .sum::<u64>();
+                    (milliseconds > 0).then_some(milliseconds)
+                })
+                .unwrap_or(0),
+        )
+    }
+}
+
+/// Pager metadata returned by artist lists.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pager {
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub page: u64,
+    #[serde(default)]
+    pub per_page: u64,
+}
+
+/// A batch of tracks from a rotor/wave station.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveBatch {
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub radio_session_id: Option<String>,
+    #[serde(default)]
+    pub sequence: Vec<WaveSequence>,
+}
+
+impl WaveBatch {
+    /// Playable tracks from the batch in station order.
+    pub fn tracks(&self) -> Vec<Track> {
+        self.sequence
+            .iter()
+            .filter_map(|item| item.track.clone())
+            .collect()
+    }
+}
+
+/// One entry in a wave sequence.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveSequence {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub track: Option<Track>,
+    #[serde(default)]
+    pub liked: bool,
+}
+
+/// A page of artist tracks.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistTracks {
+    #[serde(default)]
+    pub tracks: Vec<Track>,
+    #[serde(default)]
+    pub pager: Option<Pager>,
+}
+
+/// A page of artist albums.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistAlbums {
+    #[serde(default)]
+    pub albums: Vec<Album>,
+    #[serde(default)]
+    pub pager: Option<Pager>,
 }
 
 /// A cover object (artists expose covers as objects rather than URIs).
