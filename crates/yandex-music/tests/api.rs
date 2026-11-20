@@ -528,3 +528,77 @@ fn playlists_list_and_detail_are_parsed() {
     assert_eq!(full.tracks[0].track_id(), "101:555");
     assert_eq!(full.tracks[1].track_id(), "102");
 }
+
+#[test]
+fn search_artists_and_albums_are_parsed() {
+    let server = TestServer::start(|request| {
+        assert_eq!(request.path, "/search");
+        assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+        match request.query_value("type") {
+            Some("artist") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "artists": {
+                            "type": "artist",
+                            "total": 1,
+                            "perPage": 10,
+                            "order": 0,
+                            "results": [{
+                                "id": 9262,
+                                "name": "Nirvana",
+                                "genres": ["rock", "alternative"],
+                                "cover": {
+                                    "type": "pic",
+                                    "uri": "avatars.yandex.net/get-music-content/1/%%"
+                                }
+                            }]
+                        }
+                    }
+                }),
+            ),
+            Some("album") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "albums": {
+                            "type": "album",
+                            "total": 1,
+                            "perPage": 10,
+                            "order": 1,
+                            "results": [{
+                                "id": 5576245,
+                                "title": "Nevermind",
+                                "year": 1991,
+                                "trackCount": 12,
+                                "coverUri": "avatars.yandex.net/get-music-content/2/%%",
+                                "artists": [{"id": 9262, "name": "Nirvana"}]
+                            }]
+                        }
+                    }
+                }),
+            ),
+            other => panic!("unexpected search type: {other:?}"),
+        }
+    });
+
+    let client = client_for(&server, Some("test-token"));
+
+    let artists = client.search_artists("nirvana", 0).unwrap();
+    assert_eq!(artists.total, 1);
+    assert_eq!(artists.results[0].display_name(), "Nirvana");
+    assert_eq!(artists.results[0].genres, vec!["rock", "alternative"]);
+    assert_eq!(
+        artists.results[0].cover_url(300).as_deref(),
+        Some("https://avatars.yandex.net/get-music-content/1/300x300")
+    );
+
+    let albums = client.search_albums("nirvana", 0).unwrap();
+    assert_eq!(albums.results[0].display_title(), "Nevermind");
+    assert_eq!(albums.results[0].artist_names(), "Nirvana");
+    assert_eq!(albums.results[0].year, Some(1991));
+    assert_eq!(
+        albums.results[0].cover_url(400).as_deref(),
+        Some("https://avatars.yandex.net/get-music-content/2/400x400")
+    );
+}

@@ -8,10 +8,12 @@ use gpui::{
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use yandex_music::{Client, DeviceCode, Error as MusicError, Playlist, Status, Track, TrackShort};
+use yandex_music::{
+    Album, Artist, Client, DeviceCode, Error as MusicError, Playlist, Status, Track, TrackShort,
+};
 
 /// Which top-level screen is visible.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,10 +43,27 @@ pub(crate) struct PlaylistsState {
 }
 
 /// State of the search page.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SearchKind {
+    #[default]
+    Tracks,
+    Artists,
+    Albums,
+}
+
+enum SearchPayload {
+    Tracks(yandex_music::SearchResult<Track>),
+    Artists(yandex_music::SearchResult<Artist>),
+    Albums(yandex_music::SearchResult<Album>),
+}
+
 #[derive(Default)]
 pub(crate) struct SearchState {
     pub(crate) query: String,
+    pub(crate) kind: SearchKind,
     pub(crate) results: Vec<Track>,
+    pub(crate) artists: Vec<Artist>,
+    pub(crate) albums: Vec<Album>,
     pub(crate) total: usize,
     pub(crate) page: u32,
     pub(crate) per_page: u64,
@@ -105,6 +124,7 @@ pub struct RootView {
     pub(crate) search_epoch: u64,
     pub(crate) playlists: PlaylistsState,
     pub(crate) playlist_covers: HashMap<String, Arc<Image>>,
+    pub(crate) search_images: HashMap<String, Arc<Image>>,
     pub(crate) show_token_input: bool,
     pub(crate) login_error: Option<String>,
     pub(crate) device: Option<DeviceFlow>,
@@ -183,6 +203,7 @@ impl RootView {
             search_epoch: 0,
             playlists: PlaylistsState::default(),
             playlist_covers: HashMap::new(),
+            search_images: HashMap::new(),
             show_token_input: false,
             login_error: None,
             device: None,
@@ -658,6 +679,7 @@ impl RootView {
         self.like_busy = false;
         self.player.reset();
         self.search = SearchState::default();
+        self.search_images.clear();
         self.search_epoch += 1;
         self.search_input.update(cx, |input, cx| input.clear(cx));
         self.reset_playlists();
@@ -753,46 +775,108 @@ impl RootView {
 
         if self.demo {
             let needle = query.to_lowercase();
-            let results: Vec<Track> = self
-                .profile
-                .as_ref()
-                .map(|profile| {
-                    profile
-                        .sample
-                        .iter()
-                        .filter(|track| {
-                            let haystack = format!(
-                                "{} {} {}",
-                                track.display_title(),
-                                track.artist_names(),
-                                track
-                                    .albums
-                                    .first()
-                                    .and_then(|album| album.title.as_deref())
-                                    .unwrap_or_default()
-                            )
-                            .to_lowercase();
-                            haystack.contains(&needle)
-                        })
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default();
+            let total;
+
+            if self.search.kind == SearchKind::Tracks {
+                let results: Vec<Track> = self
+                    .profile
+                    .as_ref()
+                    .map(|profile| {
+                        profile
+                            .sample
+                            .iter()
+                            .filter(|track| {
+                                let haystack = format!(
+                                    "{} {} {}",
+                                    track.display_title(),
+                                    track.artist_names(),
+                                    track
+                                        .albums
+                                        .first()
+                                        .and_then(|album| album.title.as_deref())
+                                        .unwrap_or_default()
+                                )
+                                .to_lowercase();
+                                haystack.contains(&needle)
+                            })
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                total = results.len();
+                self.search.results = results.clone();
+                self.load_covers(results, cx);
+            } else if self.search.kind == SearchKind::Artists {
+                let mut seen = HashSet::new();
+                let mut artists = Vec::new();
+                if let Some(profile) = self.profile.as_ref() {
+                    for track in &profile.sample {
+                        for artist in &track.artists {
+                            if artist
+                                .name
+                                .as_deref()
+                                .is_some_and(|name| name.to_lowercase().contains(&needle))
+                                && seen.insert(
+                                    artist
+                                        .name
+                                        .clone()
+                                        .unwrap_or_else(|| format!("{:?}", artist.id)),
+                                )
+                            {
+                                artists.push(artist.clone());
+                            }
+                        }
+                    }
+                }
+                total = artists.len();
+                self.search.artists = artists;
+            } else {
+                let mut seen = HashSet::new();
+                let mut albums = Vec::new();
+                if let Some(profile) = self.profile.as_ref() {
+                    for track in &profile.sample {
+                        let artist_names = track.artist_names().to_lowercase();
+                        for album in &track.albums {
+                            let title = album.title.as_deref().unwrap_or_default();
+                            let matches = title.to_lowercase().contains(&needle)
+                                || artist_names.contains(&needle);
+                            if matches && album.id.is_some_and(|id| seen.insert(id)) {
+                                let mut album = album.clone();
+                                album.artists = track.artists.clone();
+                                albums.push(album);
+                            }
+                        }
+                    }
+                }
+                total = albums.len();
+                self.search.albums = albums;
+            }
 
             self.search.loading = false;
-            self.search.total = results.len();
-            self.search.per_page = results.len().max(1) as u64;
+            self.search.total = total;
+            self.search.per_page = total.max(1) as u64;
             self.search.page = 0;
-            self.search.results = results.clone();
-            self.load_covers(results, cx);
             cx.notify();
             return;
         }
 
         let client = self.client.clone();
+        let kind = self.search.kind;
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
-                .background_spawn(async move { client.search_tracks(&query, page) })
+                .background_spawn(async move {
+                    match kind {
+                        SearchKind::Tracks => client
+                            .search_tracks(&query, page)
+                            .map(SearchPayload::Tracks),
+                        SearchKind::Artists => client
+                            .search_artists(&query, page)
+                            .map(SearchPayload::Artists),
+                        SearchKind::Albums => client
+                            .search_albums(&query, page)
+                            .map(SearchPayload::Albums),
+                    }
+                })
                 .await;
 
             this.update(cx, |this, cx| {
@@ -801,14 +885,30 @@ impl RootView {
                 }
                 this.search.loading = false;
                 match result {
-                    Ok(found) => {
-                        this.search.total = found.total as usize;
-                        this.search.per_page = found.per_page;
-                        this.search.page = page;
-                        this.search.results = found.results;
+                    Ok(payload) => {
                         this.search.error = None;
-                        let tracks = this.search.results.clone();
-                        this.load_covers(tracks, cx);
+                        match payload {
+                            SearchPayload::Tracks(found) => {
+                                this.search.total = found.total as usize;
+                                this.search.per_page = found.per_page;
+                                this.search.results = found.results;
+                                let tracks = this.search.results.clone();
+                                this.load_covers(tracks, cx);
+                            }
+                            SearchPayload::Artists(found) => {
+                                this.search.total = found.total as usize;
+                                this.search.per_page = found.per_page;
+                                this.search.artists = found.results;
+                                this.load_search_images(cx);
+                            }
+                            SearchPayload::Albums(found) => {
+                                this.search.total = found.total as usize;
+                                this.search.per_page = found.per_page;
+                                this.search.albums = found.results;
+                                this.load_search_images(cx);
+                            }
+                        }
+                        this.search.page = page;
                     }
                     Err(error) => {
                         this.search.error = Some(error_text(&error));
@@ -817,6 +917,109 @@ impl RootView {
                 cx.notify();
             })
             .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn set_search_kind(&mut self, kind: SearchKind, cx: &mut Context<Self>) {
+        if self.search.kind == kind {
+            return;
+        }
+        self.search.kind = kind;
+        let query = self.search_input.read(cx).text().trim().to_string();
+        let query = if query.is_empty() {
+            self.search.query.clone()
+        } else {
+            query
+        };
+        if query.is_empty() {
+            self.search.results.clear();
+            self.search.artists.clear();
+            self.search.albums.clear();
+            self.search.total = 0;
+            self.search.page = 0;
+            self.search.per_page = 0;
+            self.search.searched = false;
+            self.search.error = None;
+            cx.notify();
+            return;
+        }
+        self.run_search(query, 0, cx);
+    }
+
+    pub(crate) fn search_for_artist(&mut self, name: String, cx: &mut Context<Self>) {
+        self.search.kind = SearchKind::Tracks;
+        self.search_input
+            .update(cx, |input, cx| input.set_text(name.clone(), cx));
+        self.run_search(name, 0, cx);
+    }
+
+    pub(crate) fn search_for_album(&mut self, album: Album, cx: &mut Context<Self>) {
+        let artists = album.artist_names();
+        let query = if artists.is_empty() {
+            album.display_title().to_string()
+        } else {
+            format!("{} {}", artists, album.display_title())
+        };
+        self.search.kind = SearchKind::Tracks;
+        self.search_input
+            .update(cx, |input, cx| input.set_text(query.clone(), cx));
+        self.run_search(query, 0, cx);
+    }
+
+    fn load_search_images(&mut self, cx: &mut Context<Self>) {
+        if self.demo {
+            return;
+        }
+        let epoch = self.search_epoch;
+        let mut covers: Vec<(String, String)> = Vec::new();
+        for artist in &self.search.artists {
+            if let (Some(id), Some(url)) = (artist.id, artist.cover_url(200)) {
+                covers.push((format!("artist-{id}"), url));
+            }
+        }
+        for album in &self.search.albums {
+            if let (Some(id), Some(url)) = (album.id, album.cover_url(300)) {
+                covers.push((format!("album-{id}"), url));
+            }
+        }
+        if covers.is_empty() {
+            return;
+        }
+
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            for (key, url) in covers {
+                let already = this
+                    .update(cx, |this, _| this.search_images.contains_key(&key))
+                    .unwrap_or(true);
+                if already {
+                    continue;
+                }
+                let client = client.clone();
+                let bytes = cx
+                    .background_spawn(async move { client.download_image(&url).ok() })
+                    .await;
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+                let Some(image) = decode_image(bytes) else {
+                    continue;
+                };
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.search_epoch != epoch {
+                            return false;
+                        }
+                        this.search_images.insert(key, image);
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
         })
         .detach();
     }

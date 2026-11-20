@@ -5,7 +5,7 @@ use crate::auth::{
 };
 use crate::download::{DownloadInfo, DownloadedTrack, build_direct_link, select_best_mp3};
 use crate::http::Transport;
-use crate::models::{Playlist, SearchResult, Status, Track, TracksList};
+use crate::models::{Album, Artist, Playlist, SearchResult, Status, Track, TracksList};
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -385,6 +385,55 @@ impl Client {
 
         let response: SearchResponse = self.inner.http.get(&url, &query, Some(&token))?;
         Ok(response.tracks.unwrap_or_default())
+    }
+
+    /// Search for artists.
+    pub fn search_artists(&self, text: &str, page: u32) -> Result<SearchResult<Artist>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SearchResponse {
+            #[serde(default)]
+            artists: Option<SearchResult<Artist>>,
+        }
+
+        let value = self.search_raw(text, page, "artist")?;
+        let response: SearchResponse = serde_json::from_value(value)
+            .map_err(|error| Error::Decode(format!("search artists: {error}")))?;
+        Ok(response.artists.unwrap_or_default())
+    }
+
+    /// Search for albums.
+    pub fn search_albums(&self, text: &str, page: u32) -> Result<SearchResult<Album>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SearchResponse {
+            #[serde(default)]
+            albums: Option<SearchResult<Album>>,
+        }
+
+        let value = self.search_raw(text, page, "album")?;
+        let response: SearchResponse = serde_json::from_value(value)
+            .map_err(|error| Error::Decode(format!("search albums: {error}")))?;
+        Ok(response.albums.unwrap_or_default())
+    }
+
+    fn search_raw(&self, text: &str, page: u32, kind: &str) -> Result<serde_json::Value> {
+        let token = self.require_token()?;
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(Error::BadRequest("search query is empty".into()));
+        }
+
+        let url = self.api_url("/search");
+        let query = [
+            ("text", text.to_string()),
+            ("nocorrect", "false".to_string()),
+            ("type", kind.to_string()),
+            ("page", page.to_string()),
+            ("playlist-in-best", "true".to_string()),
+        ];
+
+        self.inner.http.get(&url, &query, Some(&token))
     }
 
     // ---------------------------------------------------------------- Likes

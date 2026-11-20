@@ -212,9 +212,25 @@ pub struct Artist {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub cover: Option<Cover>,
+    #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
     pub various: Option<bool>,
     #[serde(default)]
     pub composer: Option<bool>,
+}
+
+impl Artist {
+    /// Artist name with a fallback for malformed search results.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or("Неизвестный исполнитель")
+    }
+
+    /// URL of the artist cover at the requested size.
+    pub fn cover_url(&self, size: u32) -> Option<String> {
+        self.cover.as_ref().and_then(|cover| cover.url(size))
+    }
 }
 
 /// An album as embedded into a track.
@@ -235,6 +251,33 @@ pub struct Album {
     pub genre: Option<String>,
     #[serde(default)]
     pub release_date: Option<String>,
+    #[serde(default)]
+    pub artists: Vec<Artist>,
+}
+
+impl Album {
+    /// Album title with a fallback.
+    pub fn display_title(&self) -> &str {
+        self.title.as_deref().unwrap_or("Без названия")
+    }
+
+    /// Comma-separated artist names.
+    pub fn artist_names(&self) -> String {
+        self.artists
+            .iter()
+            .filter_map(|artist| artist.name.as_deref())
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// URL of the album cover at the requested size.
+    pub fn cover_url(&self, size: u32) -> Option<String> {
+        self.cover_uri
+            .as_deref()
+            .filter(|uri| !uri.is_empty())
+            .map(|uri| cover_url(uri, size))
+    }
 }
 
 /// A cover object (artists expose covers as objects rather than URIs).
