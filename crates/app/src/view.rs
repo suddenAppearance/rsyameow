@@ -1079,8 +1079,11 @@ impl RootView {
             .on_toggle(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.toggle_playback(cx);
             }))
+            .on_previous(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.play_previous(cx);
+            }))
             .on_next(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                this.play_random(cx);
+                this.play_next(cx);
             }));
 
         let _ = theme;

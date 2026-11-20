@@ -164,6 +164,7 @@ pub mod icons {
     pub const PLAY: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";
     pub const NEXT: &str = "icons/next.svg";
+    pub const PREVIOUS: &str = "icons/previous.svg";
     pub const SHUFFLE: &str = "icons/shuffle.svg";
     pub const LOGOUT: &str = "icons/logout.svg";
     pub const USER: &str = "icons/user.svg";

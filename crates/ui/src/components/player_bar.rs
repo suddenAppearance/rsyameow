@@ -23,6 +23,7 @@ pub struct PlayerBar {
     quality: Option<SharedString>,
     error: Option<SharedString>,
     on_toggle: Option<ClickHandler>,
+    on_previous: Option<ClickHandler>,
     on_next: Option<ClickHandler>,
 }
 
@@ -40,6 +41,7 @@ impl PlayerBar {
             quality: None,
             error: None,
             on_toggle: None,
+            on_previous: None,
             on_next: None,
         }
     }
@@ -104,6 +106,14 @@ impl PlayerBar {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_next = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_previous(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_previous = Some(Box::new(handler));
         self
     }
 }
@@ -238,6 +248,16 @@ impl RenderOnce for PlayerBar {
             toggle = toggle.on_click(handler);
         }
 
+        let mut previous = IconButton::new("player-previous", icons::PREVIOUS)
+            .size(36.0)
+            .icon_size(16.0)
+            .variant(ButtonVariant::Ghost);
+        if !has_track || self.loading {
+            previous = previous.disabled(true);
+        } else if let Some(handler) = self.on_previous {
+            previous = previous.on_click(handler);
+        }
+
         let mut next = IconButton::new("player-next", icons::NEXT)
             .size(36.0)
             .icon_size(16.0)
@@ -252,6 +272,7 @@ impl RenderOnce for PlayerBar {
             .flex()
             .items_center()
             .gap(px(space::SM))
+            .child(previous)
             .child(toggle)
             .child(next);
 

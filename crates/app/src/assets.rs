@@ -16,6 +16,7 @@ impl AssetSource for Assets {
             "icons/play.svg" => asset!("icons/play.svg"),
             "icons/pause.svg" => asset!("icons/pause.svg"),
             "icons/next.svg" => asset!("icons/next.svg"),
+            "icons/previous.svg" => asset!("icons/previous.svg"),
             "icons/shuffle.svg" => asset!("icons/shuffle.svg"),
             "icons/logout.svg" => asset!("icons/logout.svg"),
             "icons/user.svg" => asset!("icons/user.svg"),

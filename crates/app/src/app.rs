@@ -80,6 +80,8 @@ pub struct RootView {
     pub(crate) player: PlayerState,
     pub(crate) audio: AudioEngine,
     pub(crate) playback_epoch: u64,
+    pub(crate) queue: Vec<String>,
+    pub(crate) queue_index: Option<usize>,
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
@@ -129,6 +131,8 @@ impl RootView {
             player: PlayerState::default(),
             audio: AudioEngine::new(),
             playback_epoch: 0,
+            queue: Vec::new(),
+            queue_index: None,
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
@@ -176,6 +180,8 @@ impl RootView {
                         return;
                     }
 
+                    let mut finished = false;
+
                     if this.demo {
                         this.player.position += Duration::from_millis(500);
                         if let Some(duration) = this.player.track.as_ref().map(Track::duration)
@@ -183,6 +189,7 @@ impl RootView {
                         {
                             this.player.position = duration;
                             this.player.playing = false;
+                            finished = true;
                         }
                     } else {
                         this.player.position = this.audio.position();
@@ -192,10 +199,15 @@ impl RootView {
                             {
                                 this.player.position = duration;
                             }
+                            finished = true;
                         }
                     }
 
-                    cx.notify();
+                    if finished && this.queue.len() > 1 {
+                        this.play_next(cx);
+                    } else {
+                        cx.notify();
+                    }
                 });
 
                 if updated.is_err() {
@@ -389,6 +401,8 @@ impl RootView {
         self.demo = false;
         self.profile = None;
         self.covers.clear();
+        self.queue.clear();
+        self.queue_index = None;
         self.player.reset();
         self.device = None;
         self.auth_busy = false;
@@ -409,6 +423,8 @@ impl RootView {
         self.player.reset();
         self.profile = None;
         self.covers.clear();
+        self.queue.clear();
+        self.queue_index = None;
         self.audio.stop();
         cx.notify();
 
@@ -550,6 +566,8 @@ impl RootView {
         self.device = None;
         self.auth_busy = false;
         self.pending_save_token = None;
+        self.queue.clear();
+        self.queue_index = None;
         self.player.reset();
 
         let tracks = demo::tracks();
@@ -577,61 +595,110 @@ impl RootView {
 
     // ----------------------------------------------------------------- Playback
 
+    /// Build the playback queue from the loaded profile on first use.
+    fn ensure_queue(&mut self) -> bool {
+        if !self.queue.is_empty() {
+            return true;
+        }
+
+        if let Some(profile) = self.profile.as_ref() {
+            self.queue = if self.demo {
+                profile
+                    .sample
+                    .iter()
+                    .map(|track| track.id.clone())
+                    .collect()
+            } else {
+                profile.liked.iter().map(TrackShort::track_id).collect()
+            };
+        }
+
+        !self.queue.is_empty()
+    }
+
+    fn queue_empty_error(&mut self, cx: &mut Context<Self>) {
+        self.player.error = Some(if self.profile.is_none() {
+            "Профиль ещё не загружен.".to_string()
+        } else if self.demo {
+            "В демо-коллекции нет треков.".to_string()
+        } else {
+            "В «Мне нравится» пока нет треков. Добавьте пару песен в Яндекс Музыке и обновите профиль.".to_string()
+        });
+        cx.notify();
+    }
+
+    fn play_queue_index(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(id) = self.queue.get(index).cloned() else {
+            self.queue_empty_error(cx);
+            return;
+        };
+
+        let Some(profile) = self.profile.as_ref() else {
+            self.queue_empty_error(cx);
+            return;
+        };
+
+        self.queue_index = Some(index);
+
+        if self.demo {
+            let track = profile
+                .sample
+                .iter()
+                .find(|track| track.id == id || track.full_id() == id)
+                .cloned();
+            match track {
+                Some(track) => self.start_demo_track(track, cx),
+                None => {
+                    self.player.error = Some("Демо-трек не найден.".into());
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        let known = profile
+            .sample
+            .iter()
+            .find(|track| track.id == id || track.full_id() == id)
+            .cloned();
+        self.load_and_play(known, id, cx);
+    }
+
     pub(crate) fn play_random(&mut self, cx: &mut Context<Self>) {
         if self.player.loading {
             return;
         }
 
-        if self.demo {
-            let track = self.profile.as_ref().and_then(|profile| {
-                if profile.sample.is_empty() {
-                    None
-                } else {
-                    let index = rand::rng().random_range(0..profile.sample.len());
-                    Some(profile.sample[index].clone())
-                }
-            });
-            if let Some(track) = track {
-                self.start_demo_track(track, cx);
-            } else {
-                self.player.error = Some("В демо-коллекции нет треков.".into());
-                cx.notify();
-            }
+        if !self.ensure_queue() {
+            self.queue_empty_error(cx);
             return;
         }
 
-        let Some(profile) = self.profile.as_ref() else {
-            self.player.error = Some("Профиль ещё не загружен.".into());
-            cx.notify();
-            return;
-        };
+        let index = rand::rng().random_range(0..self.queue.len());
+        self.play_queue_index(index, cx);
+    }
 
-        if profile.liked.is_empty() {
-            self.player.error = Some(
-                "В «Мне нравится» пока нет треков. Добавьте пару песен в Яндекс Музыке и обновите профиль."
-                    .into(),
-            );
-            cx.notify();
+    pub(crate) fn play_next(&mut self, cx: &mut Context<Self>) {
+        if !self.ensure_queue() {
+            self.queue_empty_error(cx);
             return;
         }
 
-        let index = rand::rng().random_range(0..profile.liked.len());
-        let short = profile.liked[index].clone();
-        let known = profile
-            .sample
-            .iter()
-            .find(|track| track.id == short.id || track.full_id() == short.track_id())
-            .cloned();
+        let index = step_index(self.queue_index, self.queue.len(), true);
+        self.play_queue_index(index, cx);
+    }
 
-        self.load_and_play(known, short.track_id(), cx);
+    pub(crate) fn play_previous(&mut self, cx: &mut Context<Self>) {
+        if !self.ensure_queue() {
+            self.queue_empty_error(cx);
+            return;
+        }
+
+        let index = step_index(self.queue_index, self.queue.len(), false);
+        self.play_queue_index(index, cx);
     }
 
     pub(crate) fn play_track(&mut self, track: Track, cx: &mut Context<Self>) {
-        if self.demo {
-            self.start_demo_track(track, cx);
-            return;
-        }
-
         let same_track = self
             .player
             .track
@@ -643,8 +710,19 @@ impl RootView {
             return;
         }
 
-        let id = track.full_id();
-        self.load_and_play(Some(track), id, cx);
+        self.ensure_queue();
+        let full_id = track.full_id();
+        self.queue_index = self
+            .queue
+            .iter()
+            .position(|id| id == &full_id || id == &track.id);
+
+        if self.demo {
+            self.start_demo_track(track, cx);
+            return;
+        }
+
+        self.load_and_play(Some(track), full_id, cx);
     }
 
     fn load_and_play(
@@ -799,6 +877,23 @@ impl Drop for RootView {
     }
 }
 
+/// Advance a queue position with wrap-around.
+fn step_index(current: Option<usize>, len: usize, forward: bool) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    match current {
+        Some(index) if index < len => {
+            if forward {
+                (index + 1) % len
+            } else {
+                (index + len - 1) % len
+            }
+        }
+        _ => 0,
+    }
+}
+
 /// Decode downloaded cover bytes into a gpui image.
 pub(crate) fn decode_image(bytes: Vec<u8>) -> Option<Arc<Image>> {
     let format = match image::guess_format(&bytes).ok()? {
@@ -875,4 +970,20 @@ pub(crate) fn plus_until(status: &Status) -> String {
                 .map(format::date)
         })
         .unwrap_or_else(|| "—".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_index;
+
+    #[test]
+    fn queue_index_wraps_in_both_directions() {
+        assert_eq!(step_index(None, 3, true), 0);
+        assert_eq!(step_index(Some(0), 3, true), 1);
+        assert_eq!(step_index(Some(2), 3, true), 0);
+        assert_eq!(step_index(Some(0), 3, false), 2);
+        assert_eq!(step_index(Some(2), 3, false), 1);
+        assert_eq!(step_index(Some(5), 3, true), 0);
+        assert_eq!(step_index(Some(0), 0, true), 0);
+    }
 }
