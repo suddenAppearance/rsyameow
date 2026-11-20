@@ -1,0 +1,204 @@
+use crate::theme::{Theme, icons, space, text};
+use gpui::{
+    App, ClickEvent, ElementId, FontWeight, Image, ImageSource, IntoElement, ObjectFit, RenderOnce,
+    SharedString, Window, img, prelude::*, px,
+};
+use std::sync::Arc;
+
+use super::{ClickHandler, Icon};
+
+/// A single song row: index or equalizer, cover, title, artist and duration.
+#[derive(IntoElement)]
+pub struct TrackRow {
+    id: ElementId,
+    index: usize,
+    title: SharedString,
+    artist: SharedString,
+    duration: SharedString,
+    cover: Option<Arc<Image>>,
+    current: bool,
+    playing: bool,
+    on_play: Option<ClickHandler>,
+}
+
+impl TrackRow {
+    pub fn new(
+        id: impl Into<ElementId>,
+        index: usize,
+        title: impl Into<SharedString>,
+        artist: impl Into<SharedString>,
+        duration: impl Into<SharedString>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            index,
+            title: title.into(),
+            artist: artist.into(),
+            duration: duration.into(),
+            cover: None,
+            current: false,
+            playing: false,
+            on_play: None,
+        }
+    }
+
+    pub fn cover(mut self, cover: Option<Arc<Image>>) -> Self {
+        self.cover = cover;
+        self
+    }
+
+    pub fn current(mut self, current: bool, playing: bool) -> Self {
+        self.current = current;
+        self.playing = playing;
+        self
+    }
+
+    pub fn on_play(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_play = Some(Box::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for TrackRow {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::get(cx);
+
+        let cover = match self.cover {
+            Some(image) => img(ImageSource::Image(image))
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            None => gpui::div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(theme.colors.surface_active)
+                .child(
+                    Icon::new(icons::MUSIC)
+                        .size(18.0)
+                        .color(theme.colors.text_muted),
+                )
+                .into_any_element(),
+        };
+
+        let leading = if self.current {
+            gpui::div()
+                .w(px(22.0))
+                .h(px(16.0))
+                .flex()
+                .items_end()
+                .justify_center()
+                .gap(px(2.0))
+                .child(
+                    gpui::div()
+                        .w(px(3.0))
+                        .h(px(7.0))
+                        .rounded_full()
+                        .bg(theme.colors.accent),
+                )
+                .child(
+                    gpui::div()
+                        .w(px(3.0))
+                        .h(px(13.0))
+                        .rounded_full()
+                        .bg(theme.colors.accent),
+                )
+                .child(
+                    gpui::div()
+                        .w(px(3.0))
+                        .h(if self.playing { px(10.0) } else { px(5.0) })
+                        .rounded_full()
+                        .bg(theme.colors.accent),
+                )
+                .into_any_element()
+        } else {
+            gpui::div()
+                .w(px(22.0))
+                .text_size(px(text::SM))
+                .text_color(theme.colors.text_muted)
+                .child(format!("{}", self.index))
+                .into_any_element()
+        };
+
+        let mut row = gpui::div()
+            .id(self.id)
+            .flex()
+            .items_center()
+            .gap(px(space::MD))
+            .h(px(56.0))
+            .px(px(space::SM))
+            .rounded(px(10.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.colors.surface_hover));
+
+        if self.current {
+            row = row.bg(theme.colors.surface);
+        }
+
+        if let Some(handler) = self.on_play {
+            row = row.on_click(handler);
+        }
+
+        row.child(leading)
+            .child(
+                gpui::div()
+                    .size(px(40.0))
+                    .rounded(px(6.0))
+                    .overflow_hidden()
+                    .flex_shrink_0()
+                    .child(cover),
+            )
+            .child(
+                gpui::div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .gap(px(1.0))
+                    .child(
+                        gpui::div()
+                            .text_size(px(text::BASE))
+                            .font_weight(if self.current {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if self.current {
+                                theme.colors.accent
+                            } else {
+                                theme.colors.text
+                            })
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(self.title),
+                    )
+                    .child(
+                        gpui::div()
+                            .text_size(px(text::SM))
+                            .text_color(theme.colors.text_muted)
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(self.artist),
+                    ),
+            )
+            .child(
+                gpui::div()
+                    .text_size(px(text::SM))
+                    .text_color(theme.colors.text_muted)
+                    .w(px(44.0))
+                    .text_right()
+                    .child(self.duration),
+            )
+            .child(Icon::new(icons::PLAY).size(14.0).color(if self.current {
+                theme.colors.accent
+            } else {
+                theme.colors.text_muted
+            }))
+    }
+}

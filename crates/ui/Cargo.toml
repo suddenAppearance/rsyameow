@@ -1,0 +1,16 @@
+[package]
+name = "rsyameow-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "UI kit for the rsyameow Yandex Music client"
+repository.workspace = true
+
+[lib]
+name = "rsyameow_ui"
+path = "src/lib.rs"
+
+[dependencies]
+gpui.workspace = true

@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app",
+    "crates/ui",
+    "crates/yandex-music",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.90"
+authors = ["rsyameow contributors"]
+repository = "https://github.com/suddenAppearance/rsyameow"
+
+[workspace.dependencies]
+gpui = "0.2.2"
+md-5 = "0.10"
+rand = "0.9"
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# `gpui` pulls in `zed-async-tar` -> `xattr 0.2.3`, which does not compile with
+# current libc releases (`ENOATTR` is no longer defined for Linux). The vendored
+# copy maps it to `ENODATA` on Linux, which is the same value there.
+[patch.crates-io]
+xattr = { path = "third_party/xattr" }

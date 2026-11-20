@@ -1,0 +1,22 @@
+[package]
+name = "yandex-music"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Unofficial Rust client for the Yandex Music API, ported from the Python yandex-music-api library"
+repository.workspace = true
+keywords = ["yandex", "music", "api", "client"]
+categories = ["api-bindings"]
+
+[lib]
+name = "yandex_music"
+path = "src/lib.rs"
+
+[dependencies]
+md-5.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
