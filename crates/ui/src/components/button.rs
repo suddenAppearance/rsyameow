@@ -256,6 +256,7 @@ pub struct IconButton {
     loading: bool,
     on_click: Option<ClickHandler>,
     on_hover: Option<HoverHandler>,
+    occlude: bool,
 }
 
 impl IconButton {
@@ -270,6 +271,7 @@ impl IconButton {
             loading: false,
             on_click: None,
             on_hover: None,
+            occlude: false,
         }
     }
 
@@ -308,6 +310,11 @@ impl IconButton {
 
     pub fn on_hover(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(handler));
+        self
+    }
+
+    pub fn occlude(mut self) -> Self {
+        self.occlude = true;
         self
     }
 }
@@ -365,6 +372,9 @@ impl RenderOnce for IconButton {
             button = button.on_hover(move |hovered, window, cx| {
                 handler(hovered, window, cx);
             });
+        }
+        if self.occlude {
+            button = button.occlude();
         }
 
         if disabled {

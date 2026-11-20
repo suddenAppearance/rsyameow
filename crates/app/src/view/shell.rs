@@ -391,20 +391,8 @@ impl RootView {
             .as_ref()
             .map(|track| track.artist_names())
             .unwrap_or_default();
-        let duration = track
-            .as_ref()
-            .map(|track| format::duration_or_dash(track.duration()))
-            .unwrap_or_else(|| "0:00".into());
         let seek_preview = self.seek_preview;
         let progress = seek_preview.unwrap_or_else(|| self.player.progress());
-        let elapsed = if let Some(fraction) = seek_preview {
-            track
-                .as_ref()
-                .map(|track| format::duration(track.duration().mul_f32(fraction)))
-                .unwrap_or_else(|| "0:00".into())
-        } else {
-            format::duration(self.player.position)
-        };
         let seek_hover = self.seek_hover;
         let seek_time = if seek_preview.is_some() || seek_hover.is_some() {
             track.as_ref().map(|track| {
@@ -443,7 +431,7 @@ impl RootView {
             )
             .artists(artist_names)
             .cover(self.player.cover.clone())
-            .progress(progress, elapsed, duration)
+            .progress(progress)
             .playing(self.player.playing)
             .loading(self.player.loading)
             .quality(self.player.quality.clone())

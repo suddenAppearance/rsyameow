@@ -24,8 +24,6 @@ pub struct PlayerBar {
     artist_names: Vec<SharedString>,
     cover: Option<Arc<Image>>,
     progress: f32,
-    elapsed: SharedString,
-    duration: SharedString,
     playing: bool,
     loading: bool,
     quality: Option<SharedString>,
@@ -62,8 +60,6 @@ impl PlayerBar {
             artist_names: Vec::new(),
             cover: None,
             progress: 0.0,
-            elapsed: "0:00".into(),
-            duration: "0:00".into(),
             playing: false,
             loading: false,
             quality: None,
@@ -113,15 +109,8 @@ impl PlayerBar {
         self
     }
 
-    pub fn progress(
-        mut self,
-        progress: f32,
-        elapsed: impl Into<SharedString>,
-        duration: impl Into<SharedString>,
-    ) -> Self {
-        self.progress = progress;
-        self.elapsed = elapsed.into();
-        self.duration = duration.into();
+    pub fn progress(mut self, progress: f32) -> Self {
+        self.progress = progress.clamp(0.0, 1.0);
         self
     }
 
@@ -399,7 +388,7 @@ fn clear_tooltip_on_hover(
     seek_handler: Option<SeekHoverHandler>,
     controls_handler: Option<ControlsHoverHandler>,
 ) -> IconButton {
-    button.on_hover(move |hovered, window, cx| {
+    button.occlude().on_hover(move |hovered, window, cx| {
         if let Some(handler) = controls_handler.as_ref() {
             handler(*hovered, window, cx);
         }
@@ -696,8 +685,6 @@ impl RenderOnce for PlayerBar {
         }
 
         let controls = gpui::div()
-            .id("player-controls")
-            .occlude()
             .flex()
             .items_center()
             .gap(px(space::SM))
@@ -707,28 +694,6 @@ impl RenderOnce for PlayerBar {
             .child(next)
             .child(like)
             .child(queue);
-
-        let progress_row = gpui::div()
-            .w_full()
-            .max_w(px(520.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                gpui::div()
-                    .w(px(38.0))
-                    .text_size(px(text::XS))
-                    .text_color(theme.colors.text_muted)
-                    .text_right()
-                    .child(self.elapsed),
-            )
-            .child(
-                gpui::div()
-                    .w(px(38.0))
-                    .text_size(px(text::XS))
-                    .text_color(theme.colors.text_muted)
-                    .child(self.duration),
-            );
 
         let seek_active = self.seek_hover.is_some() || self.seek_preview.is_some();
         let mut center = gpui::div()
@@ -741,7 +706,6 @@ impl RenderOnce for PlayerBar {
             .flex_1()
             .min_w(px(0.0))
             .h_full()
-            .rounded(px(12.0))
             .bg(gpui::rgba(0xFFFFFF06))
             .hover(|style| style.bg(gpui::rgba(0xFFFFFF0F)));
 
@@ -755,7 +719,6 @@ impl RenderOnce for PlayerBar {
                 .top(px(0.0))
                 .left(px(0.0))
                 .size_full()
-                .rounded(px(12.0))
                 .overflow_hidden()
                 .child(
                     gpui::div()
@@ -780,7 +743,6 @@ impl RenderOnce for PlayerBar {
 
         center = center
             .child(controls)
-            .child(progress_row)
             .child(
                 gpui::div()
                     .absolute()
@@ -884,7 +846,7 @@ impl RenderOnce for PlayerBar {
         gpui::div()
             .id("player-bar")
             .w_full()
-            .h(px(88.0))
+            .h(px(64.0))
             .flex_shrink_0()
             .flex()
             .items_center()
