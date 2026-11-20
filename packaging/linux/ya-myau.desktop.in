@@ -2,7 +2,6 @@
 Type=Application
 Version=1.0
 Name=Я.Мяу
-Name[en]=Ya.Myau
 GenericName=Music Player
 GenericName[ru]=Музыкальный плеер
 Comment=Неофициальный клиент Яндекс Музыки

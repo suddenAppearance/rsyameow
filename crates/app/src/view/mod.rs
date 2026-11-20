@@ -96,8 +96,20 @@ impl Render for RootView {
             .bg(theme.colors.background)
             .text_color(theme.colors.text)
             .font_family(theme.fonts.ui.clone())
-            .child(title_bar(&screen, window, &theme))
-            .child(div().flex_1().min_h(px(0.0)).child(content))
+            .child(
+                // Clip the client content separately from the outer rounded
+                // frame. This keeps child backgrounds, images and absolute
+                // decorations from painting over the window corners.
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .rounded(px(window_radius))
+                    .overflow_hidden()
+                    .child(title_bar(&screen, window, &theme))
+                    .child(div().flex_1().min_h(px(0.0)).child(content)),
+            )
             .child(
                 resize_handle("resize-top", ResizeEdge::Top, CursorStyle::ResizeUpDown)
                     .absolute()

@@ -27,7 +27,7 @@ Options:
 
 Files installed:
   $PREFIX/bin/rsyameow
-  $PREFIX/share/applications/rsyameow.desktop
+  $PREFIX/share/applications/ya-myau.desktop
   $PREFIX/share/icons/hicolor/scalable/apps/rsyameow.svg
 USAGE
 }
@@ -68,7 +68,7 @@ BIN_DIR="$PREFIX/bin"
 APP_DIR="$PREFIX/share/applications"
 ICON_DIR="$PREFIX/share/icons/hicolor/scalable/apps"
 BIN="$BIN_DIR/rsyameow"
-DESKTOP="$APP_DIR/rsyameow.desktop"
+DESKTOP="$APP_DIR/ya-myau.desktop"
 ICON="$ICON_DIR/rsyameow.svg"
 
 refresh_caches() {
@@ -81,7 +81,7 @@ refresh_caches() {
 }
 
 if ((UNINSTALL)); then
-    rm -f "$BIN" "$DESKTOP" "$ICON"
+    rm -f "$BIN" "$DESKTOP" "$APP_DIR/rsyameow.desktop" "$ICON"
     refresh_caches
     echo "Я.Мяу удалён из $PREFIX"
     exit 0
@@ -109,7 +109,8 @@ install -Dm644 "$ROOT/packaging/linux/rsyameow.svg" "$ICON"
 # keeps the entry valid even when the home directory contains spaces.
 tmp_desktop="$(mktemp)"
 trap 'rm -f "$tmp_desktop"' EXIT
-sed "s|@EXEC@|$BIN|g" "$ROOT/packaging/linux/rsyameow.desktop.in" >"$tmp_desktop"
+sed "s|@EXEC@|$BIN|g" "$ROOT/packaging/linux/ya-myau.desktop.in" >"$tmp_desktop"
+rm -f "$APP_DIR/rsyameow.desktop"
 install -Dm644 "$tmp_desktop" "$DESKTOP"
 rm -f "$tmp_desktop"
 trap - EXIT

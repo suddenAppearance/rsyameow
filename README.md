@@ -246,7 +246,7 @@ cargo build --release -p rsyameow
 Скрипт собирает релизный бинарник и устанавливает его без `sudo`:
 
 - `~/.local/bin/rsyameow`;
-- `~/.local/share/applications/rsyameow.desktop` — пункт «Я.Мяу» в меню приложений;
+- `~/.local/share/applications/ya-myau.desktop` — пункт «Я.Мяу» в меню приложений;
 - `~/.local/share/icons/hicolor/scalable/apps/rsyameow.svg` — иконка.
 
 Дополнительно:
