@@ -55,6 +55,7 @@ fn track(id: &str, title: &str, artist: &str, album: &str, duration_ms: u64, yea
         artists: vec![Artist {
             id: Some(1000 + id.parse::<u64>().unwrap_or(1)),
             name: Some(artist.into()),
+            likes_count: Some(120_000 + id.parse::<u64>().unwrap_or(1) * 137),
             ..Default::default()
         }],
         albums: vec![yandex_music::Album {
@@ -71,7 +72,7 @@ fn track(id: &str, title: &str, artist: &str, album: &str, duration_ms: u64, yea
 
 /// A small, believable liked-tracks library.
 pub fn tracks() -> Vec<Track> {
-    vec![
+    let mut tracks = vec![
         track(
             "1",
             "Ночной трамвай",
@@ -128,7 +129,15 @@ pub fn tracks() -> Vec<Track> {
             312_000,
             2024,
         ),
-    ]
+    ];
+    tracks[0].explicit = Some(true);
+    tracks[2].explicit = Some(true);
+    tracks
+}
+
+/// Fictional lyrics used by the demo track page.
+pub fn demo_lyrics() -> &'static str {
+    "Ночной трамвай плывёт по краю,\nГде фонари рисуют медь.\nЯ эту песню напеваю,\nЧтобы до утра успеть.\n\nПровода гудят над крышей,\nГород прячет этажи.\nТише, тише, тише, тише —\nТрамвай, до утра бежим."
 }
 
 fn make_playlist(

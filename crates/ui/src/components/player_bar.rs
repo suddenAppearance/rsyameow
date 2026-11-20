@@ -27,6 +27,7 @@ pub struct PlayerBar {
     volume: f32,
     compact: bool,
     liked: bool,
+    explicit: bool,
     queue_open: bool,
     on_like: Option<ClickHandler>,
     on_queue: Option<ClickHandler>,
@@ -55,6 +56,7 @@ impl PlayerBar {
             volume: 0.85,
             compact: false,
             liked: false,
+            explicit: false,
             queue_open: false,
             on_like: None,
             on_queue: None,
@@ -75,6 +77,11 @@ impl PlayerBar {
     ) -> Self {
         self.title = title.into();
         self.artist = artist.into();
+        self
+    }
+
+    pub fn explicit(mut self, explicit: bool) -> Self {
+        self.explicit = explicit;
         self
     }
 
@@ -257,13 +264,29 @@ impl RenderOnce for PlayerBar {
             .gap(px(2.0))
             .child(
                 gpui::div()
-                    .text_size(px(text::BASE))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.colors.text)
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(title),
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .min_w(px(0.0))
+                    .child(
+                        gpui::div()
+                            .flex_shrink()
+                            .min_w(px(0.0))
+                            .text_size(px(text::BASE))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.colors.text)
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(title),
+                    )
+                    .when(self.explicit, |element| {
+                        element.child(
+                            Icon::new(icons::EXPLICIT)
+                                .size(12.0)
+                                .color(theme.colors.text_muted),
+                        )
+                    }),
             )
             .child(
                 gpui::div()

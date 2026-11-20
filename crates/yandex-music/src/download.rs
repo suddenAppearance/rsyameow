@@ -29,6 +29,8 @@ pub const FILE_INFO_CLIENT: &str = "YandexMusicDesktopAppWindows/5.95.0";
 /// Codecs requested for lossless playback. Raw FLAC is preferred; MP3 is the
 /// fallback when the track or account has no lossless version.
 pub const FILE_INFO_CODECS: &[&str] = &["flac", "flac-mp4", "mp3"];
+/// Key used by the Android app to sign the lyrics endpoint.
+pub const LYRICS_SIGN_KEY: &str = "p93jhgh689SBReK6ghtw62";
 
 /// Salt used by Yandex to sign direct download URLs.
 pub const SIGN_SALT: &str = "XGRlBW9FXlekgbPrRHuSiA";
@@ -159,6 +161,30 @@ pub fn file_info_sign_at(
 }
 
 /// Sign `/get-file-info` for the current Unix timestamp.
+/// Sign a lyrics request for a fixed timestamp. Unlike file-info signatures,
+/// this one keeps the standard base64 padding.
+pub fn lyrics_sign_at(track_id: &str, timestamp: u64, key: &str) -> String {
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut mac =
+        HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC accepts keys of any length");
+    mac.update(format!("{track_id}{timestamp}").as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
+/// Create a timestamp and signature for `/tracks/{id}/lyrics`.
+pub fn lyrics_sign(track_id: &str) -> Result<(u64, String)> {
+    let track_id = track_id.split(':').next().unwrap_or(track_id);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| Error::Decode(format!("system clock is before Unix epoch: {error}")))?
+        .as_secs();
+    Ok((
+        timestamp,
+        lyrics_sign_at(track_id, timestamp, LYRICS_SIGN_KEY),
+    ))
+}
+
 pub fn file_info_sign(
     track_id: &str,
     quality: &str,
@@ -329,6 +355,12 @@ mod tests {
         );
         assert_eq!(sign, "YH39qNGT90cOfpuP1sJgexVzcthU6SPLf9nSkbJnecQ");
         assert!(!sign.ends_with('='));
+    }
+
+    #[test]
+    fn signs_lyrics_requests() {
+        let sign = lyrics_sign_at("53404", 1668687184, LYRICS_SIGN_KEY);
+        assert_eq!(sign, "Vdo8bB97WZwGaDNmBiUOBATOeQI6IeItEMAsHD0HSiA=");
     }
 
     #[test]

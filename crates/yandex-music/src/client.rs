@@ -5,12 +5,12 @@ use crate::auth::{
 };
 use crate::download::{
     DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FileInfo, build_direct_link,
-    file_info_sign, select_best_mp3,
+    file_info_sign, lyrics_sign, select_best_mp3,
 };
 use crate::http::Transport;
 use crate::models::{
-    Album, Artist, ArtistAlbums, ArtistTracks, Playlist, SearchResult, Status, Track, TracksList,
-    WaveBatch,
+    Album, Artist, ArtistAlbums, ArtistTracks, Playlist, SearchResult, Status, Track, TrackLyrics,
+    TracksList, WaveBatch,
 };
 use crate::{Error, Result};
 use serde::Deserialize;
@@ -676,6 +676,38 @@ impl Client {
             codec: file.codec.clone(),
             bitrate_kbps: file.bitrate,
         })
+    }
+
+    /// Fetch the plain text of a track's lyrics.
+    ///
+    /// Returns `Ok(None)` when the track has no lyrics. The endpoint is signed
+    /// like the Python client and the actual text is downloaded from the
+    /// pre-signed URL in the response.
+    pub fn track_lyrics(&self, track_id: &str) -> Result<Option<String>> {
+        let token = self.require_token()?;
+        let raw_id = track_id.split(':').next().unwrap_or(track_id);
+        let (timestamp, sign) = lyrics_sign(raw_id)?;
+        let url = self.api_url(&format!("/tracks/{raw_id}/lyrics"));
+        let query = [
+            ("format", "TEXT".to_string()),
+            ("timeStamp", timestamp.to_string()),
+            ("sign", sign),
+        ];
+
+        let lyrics: Option<TrackLyrics> = match self.inner.http.get(&url, &query, Some(&token)) {
+            Ok(lyrics) => lyrics,
+            Err(Error::NotFound(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Some(download_url) = lyrics.and_then(|lyrics| lyrics.download_url) else {
+            return Ok(None);
+        };
+        let text = self.inner.http.get_text(&download_url, None)?;
+        if text.trim().is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(text))
+        }
     }
 
     // ---------------------------------------------------------------- Covers

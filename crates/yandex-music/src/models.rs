@@ -524,6 +524,34 @@ impl Track {
     }
 }
 
+/// Lyric metadata returned by `/tracks/{id}/lyrics`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackLyrics {
+    #[serde(default)]
+    pub download_url: Option<String>,
+    #[serde(default)]
+    pub lyric_id: Option<u64>,
+    #[serde(default)]
+    pub external_lyric_id: Option<String>,
+    #[serde(default)]
+    pub writers: Vec<String>,
+    #[serde(default)]
+    pub major: Option<LyricsMajor>,
+}
+
+/// The lyrics provider (Musixmatch and similar).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsMajor {
+    #[serde(default)]
+    pub id: Option<u64>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub pretty_name: Option<String>,
+}
+
 /// A lightweight track reference used in like lists and playlists.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

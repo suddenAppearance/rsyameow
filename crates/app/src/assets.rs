@@ -40,6 +40,7 @@ impl AssetSource for Assets {
             "icons/copy.svg" => asset!("icons/copy.svg"),
             "icons/warning.svg" => asset!("icons/warning.svg"),
             "icons/check.svg" => asset!("icons/check.svg"),
+            "icons/explicit.svg" => asset!("icons/explicit.svg"),
             "fonts/PT_Sans-Web-Regular.ttf" => asset!("fonts/PT_Sans-Web-Regular.ttf"),
             "fonts/PT_Sans-Web-Bold.ttf" => asset!("fonts/PT_Sans-Web-Bold.ttf"),
             _ => return Ok(None),

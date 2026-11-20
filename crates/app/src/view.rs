@@ -630,6 +630,9 @@ impl RootView {
                 .as_ref()
                 .map(|track| format::duration_or_dash(track.duration()))
                 .unwrap_or_default();
+            let explicit = track
+                .as_ref()
+                .is_some_and(|track| track.explicit.unwrap_or(false));
 
             let row = div()
                 .id(ElementId::Name(SharedString::from(format!(
@@ -653,6 +656,8 @@ impl RootView {
                         .id(ElementId::Name(SharedString::from(format!(
                             "queue-title-{index}"
                         ))))
+                        .flex_shrink()
+                        .min_w(px(0.0))
                         .text_size(px(text::SM))
                         .font_weight(if current {
                             gpui::FontWeight::SEMIBOLD
@@ -708,7 +713,21 @@ impl RootView {
                         .flex_1()
                         .min_w(px(0.0))
                         .gap(px(1.0))
-                        .child(title_element)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .min_w(px(0.0))
+                                .child(title_element)
+                                .when(explicit, |element| {
+                                    element.child(
+                                        Icon::new(icons::EXPLICIT)
+                                            .size(12.0)
+                                            .color(theme.colors.text_muted),
+                                    )
+                                }),
+                        )
                         .child(artist_element)
                 })
                 .child(
@@ -1701,6 +1720,7 @@ impl RootView {
                 .cover(cover)
                 .current(is_current, playing)
                 .animation_phase(self.animation_phase)
+                .explicit(track.explicit.unwrap_or(false))
                 .on_play(cx.listener({
                     let track = track.clone();
                     move |this, _: &gpui::ClickEvent, _, cx| {
@@ -1948,6 +1968,7 @@ impl RootView {
                             .cover(cover)
                             .current(is_current, playing)
                             .animation_phase(self.animation_phase)
+                            .explicit(track.explicit.unwrap_or(false))
                             .on_play(cx.listener({
                                 let track = track.clone();
                                 move |this, _: &gpui::ClickEvent, _, cx| {
@@ -2305,10 +2326,9 @@ impl RootView {
                                 "дискография",
                             ))
                             .when(likes > 0, |element| {
-                                element.child(divider_vertical(theme)).child(Stat::new(
-                                    format::plural(likes, "лайк", "лайка", "лайков"),
-                                    "слушателей",
-                                ))
+                                element
+                                    .child(divider_vertical(theme))
+                                    .child(Stat::new(format::count(likes), "лайков"))
                             }),
                     ),
             );
@@ -2372,6 +2392,7 @@ impl RootView {
                     .cover(cover)
                     .current(is_current, playing)
                     .animation_phase(self.animation_phase)
+                    .explicit(track.explicit.unwrap_or(false))
                     .on_play(cx.listener({
                         let track = track.clone();
                         let context = context.clone();
@@ -2749,6 +2770,7 @@ impl RootView {
                     .cover(cover)
                     .current(is_current, playing)
                     .animation_phase(self.animation_phase)
+                    .explicit(track.explicit.unwrap_or(false))
                     .on_play(cx.listener({
                         let track = track.clone();
                         let context = context.clone();
@@ -2855,13 +2877,18 @@ impl RootView {
             self.covers.get(&track.id).cloned()
         };
 
-        let mut artist_row = div().flex().items_center().gap(px(space::XS)).flex_wrap();
+        let lyrics = self.track_lyrics.get(&track.id).cloned().flatten();
+        let explicit = track.explicit.unwrap_or(false);
+
+        let mut artist_values = div().flex().items_center().gap(px(space::XS)).flex_wrap();
+        let mut artist_links = 0usize;
         for (index, artist) in artists.iter().enumerate() {
             let Some(id) = artist.id else {
                 continue;
             };
+            artist_links += 1;
             let artist_for_click = artist.clone();
-            artist_row = artist_row.child(
+            artist_values = artist_values.child(
                 Button::new(
                     ElementId::Name(SharedString::from(format!("track-artist-{id}-{index}"))),
                     artist.display_name().to_string(),
@@ -2873,9 +2900,17 @@ impl RootView {
                 })),
             );
         }
+        if artist_links == 0 && !artists.is_empty() {
+            artist_values = artist_values.child(
+                div()
+                    .text_size(px(text::SM))
+                    .text_color(theme.colors.white)
+                    .child(track.artist_names()),
+            );
+        }
 
-        let album_button = album.as_ref().and_then(|album| {
-            album.id.map(|id| {
+        let album_values = album.as_ref().map(|album| {
+            let album_button = album.id.map(|id| {
                 let album = album.clone();
                 Button::new(
                     ElementId::Name(SharedString::from(format!("track-album-{id}"))),
@@ -2886,7 +2921,35 @@ impl RootView {
                 .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
                     this.open_album(id, Some(album.clone()), cx);
                 }))
-            })
+            });
+            let values = match album_button {
+                Some(button) => div().child(button).into_any_element(),
+                None => div()
+                    .text_size(px(text::SM))
+                    .text_color(theme.colors.white)
+                    .child(album.display_title().to_string())
+                    .into_any_element(),
+            };
+            div()
+                .flex()
+                .items_center()
+                .gap(px(space::SM))
+                .flex_wrap()
+                .child(
+                    div()
+                        .text_size(px(text::XS))
+                        .text_color(rgba(0xFFFFFF80))
+                        .child("Альбом"),
+                )
+                .child(values)
+                .when_some(year, |element, year| {
+                    element.child(
+                        div()
+                            .text_size(px(text::XS))
+                            .text_color(rgba(0xFFFFFF66))
+                            .child(year.to_string()),
+                    )
+                })
         });
 
         let header = div()
@@ -2965,73 +3028,99 @@ impl RootView {
         let hero = glass_card(theme)
             .flex_row()
             .items_center()
-            .gap(px(space::XL))
-            .p(px(space::XL))
-            .child(search_thumb(theme, cover, icons::MUSIC, 200.0, 20.0))
+            .gap(px(space::LG))
+            .p(px(space::LG))
+            .child(search_thumb(theme, cover, icons::MUSIC, 160.0, 18.0))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .items_start()
-                    .gap(px(space::SM))
+                    .gap(px(space::XS))
                     .flex_1()
                     .min_w(px(0.0))
                     .child(
                         div()
-                            .text_size(px(36.0))
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .line_height(px(40.0))
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(track.display_title().to_string()),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .flex_shrink()
+                                    .min_w(px(0.0))
+                                    .text_size(px(30.0))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .line_height(px(34.0))
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(track.display_title().to_string()),
+                            )
+                            .when(explicit, |element| {
+                                element.child(
+                                    Icon::new(icons::EXPLICIT)
+                                        .size(17.0)
+                                        .color(rgba(0xFFFFFFB3)),
+                                )
+                            }),
                     )
-                    .when(!artists.is_empty(), |element| element.child(artist_row))
-                    .when_some(album_button, |element, album| element.child(album))
+                    .when(!artists.is_empty(), |element| {
+                        element.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(space::SM))
+                                .flex_wrap()
+                                .child(
+                                    div()
+                                        .text_size(px(text::XS))
+                                        .text_color(rgba(0xFFFFFF80))
+                                        .child("Исполнитель"),
+                                )
+                                .child(artist_values),
+                        )
+                    })
+                    .when_some(album_values, |element, album| element.child(album))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(space::XL))
-                            .pt(px(space::SM))
-                            .child(Stat::new(duration.clone(), "длительность"))
-                            .child(divider_vertical(theme))
-                            .child(Stat::new(position.clone(), "прослушано"))
-                            .when_some(quality.clone(), |element, quality| {
+                            .gap(px(space::SM))
+                            .pt(px(space::XS))
+                            .text_size(px(text::SM))
+                            .text_color(rgba(0xFFFFFFB3))
+                            .child(duration.clone())
+                            .when(is_current, |element| {
                                 element
-                                    .child(divider_vertical(theme))
-                                    .child(Badge::new(quality).tone(BadgeTone::Outline))
+                                    .child(div().text_color(rgba(0xFFFFFF4D)).child("·"))
+                                    .child(format!("прослушано {position}"))
+                            })
+                            .when_some(quality.clone(), |element, quality| {
+                                element.child(Badge::new(quality).tone(BadgeTone::Outline))
                             }),
                     ),
             );
-
-        let mut info = glass_card(theme).child(section_title(theme, "О треке"));
-        if !artists.is_empty() {
-            info = info.child(glass_info_row(theme, "Исполнители", track.artist_names()));
-        }
-        if let Some(album) = &album {
-            info = info.child(glass_info_row(
-                theme,
-                "Альбом",
-                album.display_title().to_string(),
-            ));
-        }
-        if let Some(year) = year {
-            info = info.child(glass_info_row(theme, "Год", year.to_string()));
-        }
-        info = info.child(glass_info_row(theme, "Длительность", duration));
-        if is_current {
-            info = info.child(glass_info_row(theme, "Позиция", position.clone()));
-        }
-        if let Some(quality) = quality {
-            info = info.child(glass_info_row(theme, "Качество", quality));
-        }
 
         let mut body = div().w_full().flex().flex_col().gap(px(space::LG));
         if is_current && let Some(error) = &self.player.error {
             body = body.child(error_banner(theme, error));
         }
-        body = body.child(info);
+        if let Some(lyrics) = lyrics {
+            body = body.child(
+                glass_card(theme)
+                    .child(section_title(theme, "Текст трека"))
+                    .child(
+                        div()
+                            .pt(px(space::SM))
+                            .text_size(px(15.0))
+                            .line_height(px(24.0))
+                            .text_color(rgba(0xFFFFFFD9))
+                            .whitespace_normal()
+                            .child(lyrics),
+                    ),
+            );
+        }
 
         div()
             .relative()
@@ -3141,19 +3230,34 @@ impl RootView {
                     .child(cover_element)
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
                             .pt(px(space::SM))
-                            .text_size(px(if self.viewport_height < 760.0 {
-                                28.0
-                            } else {
-                                38.0
-                            }))
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .text_center()
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
                             .max_w(px(720.0))
-                            .child(track.display_title().to_string()),
+                            .child(
+                                div()
+                                    .flex_shrink()
+                                    .min_w(px(0.0))
+                                    .text_size(px(if self.viewport_height < 760.0 {
+                                        28.0
+                                    } else {
+                                        38.0
+                                    }))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_center()
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(track.display_title().to_string()),
+                            )
+                            .when(track.explicit.unwrap_or(false), |element| {
+                                element.child(
+                                    Icon::new(icons::EXPLICIT)
+                                        .size(18.0)
+                                        .color(rgba(0xFFFFFFB3)),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -3450,6 +3554,7 @@ impl RootView {
                 .cover(cover)
                 .current(is_current, playing)
                 .animation_phase(self.animation_phase)
+                .explicit(track.explicit.unwrap_or(false))
                 .on_play(cx.listener({
                     let track = track.clone();
                     let context = context.clone();
@@ -4100,6 +4205,7 @@ impl RootView {
                 .cover(track_cover)
                 .current(is_current, playing)
                 .animation_phase(self.animation_phase)
+                .explicit(track.explicit.unwrap_or(false))
                 .on_play(cx.listener({
                     let track = track.clone();
                     move |this, _: &gpui::ClickEvent, _, cx| {
@@ -4182,6 +4288,12 @@ impl RootView {
         let volume_view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
+            .explicit(
+                self.player
+                    .track
+                    .as_ref()
+                    .is_some_and(|track| track.explicit.unwrap_or(false)),
+            )
             .cover(self.player.cover.clone())
             .progress(self.player.progress(), elapsed, duration)
             .playing(self.player.playing)
@@ -4712,34 +4824,6 @@ fn card(theme: &Theme) -> Div {
         .flex()
         .flex_col()
         .gap(px(6.0))
-}
-
-fn glass_info_row(theme: &Theme, label: &str, value: String) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(space::MD))
-        .py(px(6.0))
-        .border_b_1()
-        .border_color(rgba(0xFFFFFF24))
-        .child(
-            div()
-                .text_size(px(text::SM))
-                .text_color(rgba(0xFFFFFFA6))
-                .child(label.to_string()),
-        )
-        .child(
-            div()
-                .text_size(px(text::SM))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme.colors.white)
-                .max_w(px(280.0))
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .text_ellipsis()
-                .child(value),
-        )
 }
 
 fn info_row(theme: &Theme, label: &str, value: String) -> Div {

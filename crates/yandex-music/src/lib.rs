@@ -69,11 +69,12 @@ pub use auth::{DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DeviceCode, OAuthToken}
 pub use client::{Client, ClientBuilder};
 pub use download::{
     DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FILE_INFO_SIGN_KEY,
-    FileDownloadInfo, FileInfo, SIGN_SALT, build_direct_link, file_info_sign, file_info_sign_at,
+    FileDownloadInfo, FileInfo, LYRICS_SIGN_KEY, SIGN_SALT, build_direct_link, file_info_sign,
+    file_info_sign_at, lyrics_sign, lyrics_sign_at,
 };
 pub use error::{Error, Result};
 pub use models::{
-    Account, Album, Artist, ArtistAlbums, ArtistCounts, ArtistTracks, Cover, Pager, Permissions,
-    Playlist, Plus, SearchResult, Status, Subscription, Track, TrackShort, TracksList, User,
-    WaveBatch, WaveSequence,
+    Account, Album, Artist, ArtistAlbums, ArtistCounts, ArtistTracks, Cover, LyricsMajor, Pager,
+    Permissions, Playlist, Plus, SearchResult, Status, Subscription, Track, TrackLyrics,
+    TrackShort, TracksList, User, WaveBatch, WaveSequence,
 };

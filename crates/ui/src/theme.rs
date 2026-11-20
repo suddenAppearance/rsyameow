@@ -188,4 +188,5 @@ pub mod icons {
     pub const COPY: &str = "icons/copy.svg";
     pub const WARNING: &str = "icons/warning.svg";
     pub const CHECK: &str = "icons/check.svg";
+    pub const EXPLICIT: &str = "icons/explicit.svg";
 }

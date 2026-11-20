@@ -3,7 +3,7 @@ mod support;
 use serde_json::json;
 use std::time::Duration;
 use support::{MockResponse, TestServer};
-use yandex_music::{Client, ClientBuilder, Error};
+use yandex_music::{Client, ClientBuilder, Error, LYRICS_SIGN_KEY, lyrics_sign_at};
 
 fn client_for(server: &TestServer, token: Option<&str>) -> Client {
     let mut builder = ClientBuilder::new()
@@ -658,6 +658,64 @@ fn file_info_is_signed_and_lossless_download_is_preferred() {
     assert_eq!(downloaded.bitrate_kbps, 0);
     assert!(downloaded.bytes.starts_with(b"\x00\x00\x00\x1cftyp"));
     assert!(downloaded.direct_url.ends_with("/audio/song.m4a"));
+}
+
+#[test]
+fn lyrics_are_signed_and_downloaded_as_text() {
+    let server =
+        TestServer::start(
+            |request| match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/tracks/53404/lyrics") => {
+                    assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+                    assert_eq!(request.query_value("format"), Some("TEXT"));
+                    let timestamp = request
+                        .query_value("timeStamp")
+                        .expect("timestamp query")
+                        .parse::<u64>()
+                        .expect("numeric timestamp");
+                    assert_eq!(
+                        request.query_value("sign"),
+                        Some(lyrics_sign_at("53404", timestamp, LYRICS_SIGN_KEY).as_str())
+                    );
+                    let host = request.header("Host").expect("Host header");
+                    MockResponse::json(
+                        200,
+                        json!({
+                            "result": {
+                                "downloadUrl": format!("http://{host}/lyrics/53404.txt"),
+                                "lyricId": 1,
+                                "externalLyricId": "external",
+                                "writers": ["Kurt Cobain"],
+                                "major": {"id": 1, "name": "MUSIXMATCH", "prettyName": "Musixmatch"}
+                            }
+                        }),
+                    )
+                }
+                ("GET", "/lyrics/53404.txt") => {
+                    MockResponse::new(200, "text/plain; charset=utf-8", "Hello, hello\nHow low?")
+                }
+                other => panic!("unexpected request: {other:?}"),
+            },
+        );
+    let client = client_for(&server, Some("test-token"));
+    let lyrics = client.track_lyrics("53404:12345").unwrap();
+    assert_eq!(lyrics.as_deref(), Some("Hello, hello\nHow low?"));
+}
+
+#[test]
+fn missing_lyrics_are_reported_as_none() {
+    let server =
+        TestServer::start(
+            |request| match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/tracks/1/lyrics") => MockResponse::json(
+                    404,
+                    json!({"error": {"name": "not-found", "message": "no lyrics"}}),
+                ),
+                other => panic!("unexpected request: {other:?}"),
+            },
+        );
+    let client = client_for(&server, Some("test-token"));
+    assert_eq!(client.track_lyrics("1").unwrap(), None);
 }
 
 #[test]

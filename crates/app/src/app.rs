@@ -26,7 +26,8 @@ actions!(
 );
 
 use yandex_music::{
-    Album, Artist, Client, DeviceCode, Error as MusicError, Playlist, Status, Track, TrackShort,
+    Album, Artist, Client, DeviceCode, DownloadedTrack, Error as MusicError, Playlist, Status,
+    Track, TrackShort,
 };
 
 /// Which top-level screen is visible.
@@ -226,6 +227,10 @@ pub struct RootView {
     pub(crate) wave: WaveState,
     pub(crate) page_track: Option<Track>,
     pub(crate) page_context: Vec<Track>,
+    pub(crate) track_lyrics: HashMap<String, Option<String>>,
+    preloaded: HashMap<String, DownloadedTrack>,
+    prefetching: HashSet<String>,
+    lyrics_loading: HashSet<String>,
     pub(crate) track_palettes: HashMap<String, (Rgba, Rgba)>,
     pub(crate) track_backdrops: HashMap<String, Arc<Image>>,
     backdrop_loading: HashSet<String>,
@@ -319,6 +324,10 @@ impl RootView {
             wave: WaveState::default(),
             page_track: None,
             page_context: Vec::new(),
+            track_lyrics: HashMap::new(),
+            preloaded: HashMap::new(),
+            prefetching: HashSet::new(),
+            lyrics_loading: HashSet::new(),
             track_palettes: HashMap::new(),
             track_backdrops: HashMap::new(),
             backdrop_loading: HashSet::new(),
@@ -644,6 +653,10 @@ impl RootView {
         self.wave = WaveState::default();
         self.page_track = None;
         self.page_context.clear();
+        self.track_lyrics.clear();
+        self.preloaded.clear();
+        self.prefetching.clear();
+        self.lyrics_loading.clear();
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -677,6 +690,10 @@ impl RootView {
         self.wave = WaveState::default();
         self.page_track = None;
         self.page_context.clear();
+        self.track_lyrics.clear();
+        self.preloaded.clear();
+        self.prefetching.clear();
+        self.lyrics_loading.clear();
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -794,7 +811,15 @@ impl RootView {
                         if let Some(palette) = palette {
                             this.track_palettes.insert(track_id.clone(), palette);
                         }
-                        this.covers.insert(track_id, image);
+                        let is_current = this
+                            .player
+                            .track
+                            .as_ref()
+                            .is_some_and(|track| track.id == track_id);
+                        this.covers.insert(track_id.clone(), image.clone());
+                        if is_current {
+                            this.player.cover = Some(image);
+                        }
                         cx.notify();
                         true
                     })
@@ -846,6 +871,10 @@ impl RootView {
         self.wave = WaveState::default();
         self.page_track = None;
         self.page_context.clear();
+        self.track_lyrics.clear();
+        self.preloaded.clear();
+        self.prefetching.clear();
+        self.lyrics_loading.clear();
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -865,6 +894,8 @@ impl RootView {
             total_liked: 248,
             sample: tracks,
         });
+        self.track_lyrics
+            .insert("1".to_string(), Some(demo::demo_lyrics().to_string()));
         self.restore_state(cx);
         cx.notify();
     }
@@ -1559,6 +1590,7 @@ impl RootView {
                                 && let Ok(track) = result
                             {
                                 this.load_covers(vec![track.clone()], cx);
+                                this.load_track_lyrics(track.clone(), cx);
                                 this.load_track_backdrop(track.clone(), cx);
                                 this.page_track = Some(track);
                                 cx.notify();
@@ -1574,6 +1606,7 @@ impl RootView {
             }
             if let Some(track) = self.page_track.clone() {
                 self.load_covers(vec![track.clone()], cx);
+                self.load_track_lyrics(track.clone(), cx);
                 self.load_track_backdrop(track, cx);
             }
         }
@@ -1657,6 +1690,120 @@ impl RootView {
             self.load_track_backdrop(track, cx);
         }
         cx.notify();
+    }
+
+    pub(crate) fn load_track_lyrics(&mut self, track: Track, cx: &mut Context<Self>) {
+        let id = track.id.clone();
+        if self.track_lyrics.contains_key(&id) || self.lyrics_loading.contains(&id) {
+            return;
+        }
+        if self.demo || self.client.token().is_none() {
+            return;
+        }
+
+        self.lyrics_loading.insert(id.clone());
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+        let request_id = id.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.track_lyrics(&request_id) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.lyrics_loading.remove(&id);
+                if this.profile_epoch != epoch {
+                    return;
+                }
+                let lyrics = result.ok().flatten().filter(|text| !text.trim().is_empty());
+                this.track_lyrics.insert(id, lyrics);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    // ------------------------------------------------------------- Preloading
+
+    /// Download audio in the background so the next transition can reuse the
+    /// bytes without waiting for `/download-info` and the file itself.
+    fn prefetch_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        if self.demo || self.client.token().is_none() {
+            return;
+        }
+        let id = track.id.clone();
+        if self.preloaded.contains_key(&id) || self.prefetching.contains(&id) {
+            return;
+        }
+        if self
+            .player
+            .track
+            .as_ref()
+            .is_some_and(|current| current.id == id)
+            && self.player.audio_ready
+        {
+            return;
+        }
+
+        self.prefetching.insert(id.clone());
+        self.load_covers(vec![track.clone()], cx);
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+        let request_id = id.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.download_track(&request_id) })
+                .await;
+            this.update(cx, |this, _cx| {
+                this.prefetching.remove(&id);
+                if this.profile_epoch != epoch {
+                    return;
+                }
+                if let Ok(downloaded) = result {
+                    while this.preloaded.len() >= 4 {
+                        let Some(oldest) = this.preloaded.keys().find(|key| **key != id).cloned()
+                        else {
+                            break;
+                        };
+                        this.preloaded.remove(&oldest);
+                    }
+                    this.preloaded.insert(id, downloaded);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Keep the previous and next wave tracks warm. The current track is
+    /// already being streamed (or was prefetched on restore).
+    fn prefetch_wave_neighbors(&mut self, cx: &mut Context<Self>) {
+        if self.demo || self.queue_source != QueueSource::Wave {
+            return;
+        }
+        let Some(index) = self.queue_index else {
+            return;
+        };
+        let len = self.queue.len();
+        if len < 2 {
+            return;
+        }
+
+        let mut targets = Vec::new();
+        if let Some(previous) = self.queue.get(step_index(Some(index), len, false)) {
+            targets.push(previous.clone());
+        }
+        if index + 1 < len
+            && let Some(next) = self.queue.get(index + 1)
+        {
+            targets.push(next.clone());
+        }
+
+        for queue_id in targets {
+            if let Some(track) = self.queue_track_cache.get(&queue_id).cloned() {
+                self.prefetch_track(track, cx);
+            }
+        }
     }
 
     // ------------------------------------------------------------- Cover mood
@@ -1758,6 +1905,7 @@ impl RootView {
         if let Some(track) = self.player.track.clone() {
             self.load_track_backdrop(track, cx);
         }
+        self.prefetch_wave_neighbors(cx);
         self.nav_stack.clear();
         self.queue_open = false;
         if !self.wave.loaded && !self.wave.loading {
@@ -1819,6 +1967,9 @@ impl RootView {
             self.wave.loaded = true;
             self.wave.loading = false;
             self.wave.fetching = false;
+            for track in &incoming {
+                self.cache_track(track);
+            }
             self.load_covers(incoming.clone(), cx);
 
             if autoplay {
@@ -1892,11 +2043,15 @@ impl RootView {
                                 }
                             } else {
                                 this.wave.tracks = incoming.clone();
+                                for track in &incoming {
+                                    this.cache_track(track);
+                                }
                                 if autoplay {
                                     this.start_wave_queue(0, cx);
                                 }
                             }
                             this.load_covers(incoming, cx);
+                            this.prefetch_wave_neighbors(cx);
                         }
                     }
                     Err(error) => {
@@ -1973,6 +2128,7 @@ impl RootView {
         self.page_track = Some(track.clone());
         self.screen = Screen::Track;
         self.queue_open = false;
+        self.load_track_lyrics(track.clone(), cx);
         self.load_track_backdrop(track, cx);
         self.schedule_state_save(cx);
         cx.notify();
@@ -3000,15 +3156,18 @@ impl RootView {
             return;
         }
 
-        let known = profile
-            .sample
-            .iter()
-            .find(|track| track.id == id || track.full_id() == id)
-            .cloned();
+        let known = self.queue_track_cache.get(&id).cloned().or_else(|| {
+            profile
+                .sample
+                .iter()
+                .find(|track| track.id == id || track.full_id() == id)
+                .cloned()
+        });
         if let Some(track) = &known {
             self.cache_track(track);
         }
         self.load_and_play(known, id, cx);
+        self.prefetch_wave_neighbors(cx);
     }
 
     fn set_liked_queue(&mut self) {
@@ -3146,6 +3305,20 @@ impl RootView {
         let epoch = self.playback_epoch;
         let client = self.client.clone();
         let known = track.clone();
+        let cache_id = track
+            .as_ref()
+            .map(|track| track.id.clone())
+            .unwrap_or_else(|| {
+                requested_id
+                    .split(':')
+                    .next()
+                    .unwrap_or(&requested_id)
+                    .to_string()
+            });
+        let cached_audio = self.preloaded.remove(&cache_id);
+        let have_cover = track
+            .as_ref()
+            .is_some_and(|track| self.covers.contains_key(&track.id));
 
         if let Some(track) = &track {
             self.player.track = Some(track.clone());
@@ -3166,8 +3339,15 @@ impl RootView {
                         Some(track) => track,
                         None => client.track(&requested_id)?,
                     };
-                    let downloaded = client.download_track(&track.id)?;
-                    let cover = client.download_cover(&track, 600).ok().flatten();
+                    let downloaded = match cached_audio {
+                        Some(downloaded) => downloaded,
+                        None => client.download_track(&track.id)?,
+                    };
+                    let cover = if have_cover {
+                        None
+                    } else {
+                        client.download_cover(&track, 600).ok().flatten()
+                    };
                     Ok::<_, MusicError>((track, downloaded, cover))
                 })
                 .await;

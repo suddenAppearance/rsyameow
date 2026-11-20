@@ -18,6 +18,7 @@ pub struct TrackRow {
     cover: Option<Arc<Image>>,
     current: bool,
     playing: bool,
+    explicit: bool,
     phase: u8,
     on_play: Option<ClickHandler>,
     on_title: Option<ClickHandler>,
@@ -41,6 +42,7 @@ impl TrackRow {
             cover: None,
             current: false,
             playing: false,
+            explicit: false,
             phase: 0,
             on_play: None,
             on_title: None,
@@ -56,6 +58,11 @@ impl TrackRow {
     pub fn current(mut self, current: bool, playing: bool) -> Self {
         self.current = current;
         self.playing = playing;
+        self
+    }
+
+    pub fn explicit(mut self, explicit: bool) -> Self {
+        self.explicit = explicit;
         self
     }
 
@@ -220,6 +227,8 @@ impl RenderOnce for TrackRow {
                                 "track-title-{}-{}",
                                 self.index, self.title
                             ))))
+                            .flex_shrink()
+                            .min_w(px(0.0))
                             .cursor_pointer()
                             .text_size(px(text::BASE))
                             .font_weight(if self.current {
@@ -243,7 +252,20 @@ impl RenderOnce for TrackRow {
                                 handler(event, window, cx);
                             });
                         }
-                        title
+                        gpui::div()
+                            .flex()
+                            .flex_1()
+                            .items_center()
+                            .gap(px(6.0))
+                            .min_w(px(0.0))
+                            .child(title)
+                            .when(self.explicit, |element| {
+                                element.child(
+                                    Icon::new(icons::EXPLICIT)
+                                        .size(13.0)
+                                        .color(theme.colors.text_muted),
+                                )
+                            })
                     })
                     .child({
                         let mut artist = gpui::div()
