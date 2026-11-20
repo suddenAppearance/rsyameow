@@ -607,7 +607,7 @@ pub(crate) fn title_bar(
     screen: &Screen,
     window: &mut Window,
     theme: &Theme,
-    tray_available: bool,
+    on_close: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> AnyElement {
     let maximized = window.is_maximized();
 
@@ -638,13 +638,7 @@ pub(crate) fn title_bar(
             icons::CLOSE,
             theme.colors.white,
             theme.colors.danger,
-            move |_, window, _| {
-                if tray_available {
-                    window.minimize_window();
-                } else {
-                    window.remove_window();
-                }
-            },
+            on_close,
         ));
 
     div()

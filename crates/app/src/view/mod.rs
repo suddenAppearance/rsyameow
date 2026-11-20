@@ -118,7 +118,9 @@ impl Render for RootView {
                 &screen,
                 window,
                 &theme,
-                self.tray_handle.is_some(),
+                cx.listener(|this, _: &gpui::ClickEvent, window, cx| {
+                    this.close_window(window, cx);
+                }),
             ))
             .child(div().flex_1().min_h(px(0.0)).child(content))
             .child(

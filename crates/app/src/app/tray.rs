@@ -1,11 +1,18 @@
 //! StatusNotifier tray icon.
 
 use super::*;
-use gpui::{Context, Window};
+use gpui::{App, Context, Entity, Window};
 use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{MenuItem, StandardItem};
 use ksni::{Icon, Tray};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+
+type Root = super::RootView;
+
+static ROOT: Mutex<Option<gpui::Entity<Root>>> = Mutex::new(None);
+static BACKGROUND: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum TrayEvent {
@@ -57,11 +64,38 @@ impl Tray for AppTray {
 
 impl RootView {
     pub(crate) fn close_window(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
-        if self.tray_handle.is_some() {
-            window.minimize_window();
-        } else {
-            window.remove_window();
-        }
+        window.remove_window();
+    }
+
+    pub(crate) fn quit_app(&mut self, cx: &mut Context<Self>) {
+        quit(cx);
+    }
+
+    pub(crate) fn schedule_show_window(&mut self, cx: &mut Context<Self>) {
+        let entity = cx.entity();
+        cx.defer(move |cx| {
+            let handle = entity.read(cx).window_handle;
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
+                return;
+            }
+            let options = crate::window_options(cx);
+            let window_entity = entity.clone();
+            let result = cx.open_window(options, move |window, cx| {
+                crate::assets::install_fonts(window);
+                window.set_window_title("Я.Мяу — Яндекс Музыка");
+                let focus = window_entity.read(cx).focus_handle.clone();
+                window.focus(&focus);
+                window_entity.clone()
+            });
+            if let Ok(handle) = result {
+                let handle: gpui::AnyWindowHandle = handle.into();
+                entity.update(cx, |this, _| this.window_handle = handle);
+                cx.activate(true);
+            }
+        });
     }
 }
 
@@ -77,6 +111,28 @@ pub(crate) fn spawn_tray() -> (Option<Handle<AppTray>>, Receiver<TrayEvent>) {
     let tray = AppTray { sender };
     let handle = tray.spawn().ok();
     (handle, receiver)
+}
+
+pub(crate) fn set_background(enabled: bool) {
+    BACKGROUND.store(enabled, Ordering::Relaxed);
+}
+
+pub(crate) fn background_enabled() -> bool {
+    BACKGROUND.load(Ordering::Relaxed)
+}
+
+pub(crate) fn retain_root(root: Entity<Root>) {
+    if let Ok(mut slot) = ROOT.lock() {
+        *slot = Some(root);
+    }
+}
+
+pub(crate) fn quit(cx: &mut App) {
+    set_background(false);
+    if let Ok(mut slot) = ROOT.lock() {
+        *slot = None;
+    }
+    cx.quit();
 }
 
 fn tray_icon() -> Icon {

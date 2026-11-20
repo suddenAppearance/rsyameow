@@ -37,6 +37,42 @@ rsyameow — неофициальный клиент Яндекс Музыки �
   RSYAMEOW_DEMO       если задано, включает демо-режим
 ";
 
+pub(crate) fn window_options(cx: &mut App) -> WindowOptions {
+    let display = cx
+        .primary_display()
+        .map(|display| display.bounds().size)
+        .unwrap_or_else(|| size(px(1440.0), px(960.0)));
+    let display_width = f32::from(display.width);
+    let display_height = f32::from(display.height);
+    let max_width = (display_width - 80.0).max(960.0);
+    let max_height = (display_height - 80.0).max(640.0);
+    let (width, height) = config::load_window_size()
+        .map(|(width, height)| {
+            (
+                width.clamp(960.0, max_width),
+                height.clamp(640.0, max_height),
+            )
+        })
+        .unwrap_or_else(|| (1240.0f32.min(max_width), 900.0f32.min(max_height)));
+
+    let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_min_size: Some(size(px(960.0), px(640.0))),
+        titlebar: Some(gpui::TitlebarOptions {
+            title: Some(SharedString::from("Я.Мяу — Яндекс Музыка")),
+            appears_transparent: true,
+            ..Default::default()
+        }),
+        window_decorations: Some(WindowDecorations::Client),
+        is_movable: true,
+        is_resizable: true,
+        is_minimizable: true,
+        app_id: Some("ya-myau".to_string()),
+        ..Default::default()
+    }
+}
+
 #[derive(Debug, Default)]
 struct Args {
     token: Option<String>,
@@ -124,44 +160,7 @@ fn main() {
             })
             .detach();
 
-            let display = cx
-                .primary_display()
-                .map(|display| display.bounds().size)
-                .unwrap_or_else(|| size(px(1440.0), px(960.0)));
-            let display_width = f32::from(display.width);
-            let display_height = f32::from(display.height);
-            let max_width = (display_width - 80.0).max(960.0);
-            let max_height = (display_height - 80.0).max(640.0);
-            let (width, height) = config::load_window_size()
-                .map(|(width, height)| {
-                    (
-                        width.clamp(960.0, max_width),
-                        height.clamp(640.0, max_height),
-                    )
-                })
-                .unwrap_or_else(|| (1240.0f32.min(max_width), 900.0f32.min(max_height)));
-
-            let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(960.0), px(640.0))),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some(SharedString::from("Я.Мяу — Яндекс Музыка")),
-                    appears_transparent: true,
-                    ..Default::default()
-                }),
-                // The app draws its own header and resize edges. On Wayland
-                // every compositor supports client-side decorations; on X11
-                // gpui falls back to server decorations when no compositor is
-                // present, and the header remains usable in both cases.
-                window_decorations: Some(WindowDecorations::Client),
-                is_movable: true,
-                is_resizable: true,
-                is_minimizable: true,
-                app_id: Some("ya-myau".to_string()),
-                ..Default::default()
-            };
-
+            let options = window_options(cx);
             let token_for_window = token.clone();
             cx.open_window(options, move |window, cx| {
                 assets::install_fonts(window);
@@ -169,6 +168,9 @@ fn main() {
                 cx.new(|cx| RootView::new(demo, token, window, cx))
             })
             .expect("failed to open the main window");
+            if app::background_enabled() {
+                app::keep_alive::ensure(cx);
+            }
 
             cx.activate(true);
         });

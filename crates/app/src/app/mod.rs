@@ -5,6 +5,7 @@ mod artist;
 mod auth;
 mod cover_art;
 mod demo_mode;
+pub(crate) mod keep_alive;
 mod likes;
 mod media;
 mod navigation;
@@ -379,15 +380,6 @@ impl RootView {
         let window_handle = window.window_handle();
         let (media_controls, media_events) = media::init_media_controls();
         let (tray_handle, tray_events) = tray::spawn_tray();
-        let tray_available = tray_handle.is_some();
-        window.on_window_should_close(cx, move |window, _| {
-            if tray_available {
-                window.minimize_window();
-                false
-            } else {
-                true
-            }
-        });
         let viewport = window.viewport_size();
         let playback_settings = config::load_playback_settings();
         let volume = playback_settings.volume;
@@ -492,6 +484,10 @@ impl RootView {
             view.load_profile(cx);
         }
 
+        if view.tray_handle.is_some() {
+            tray::set_background(true);
+            tray::retain_root(cx.entity());
+        }
         window.focus(&view.focus_handle);
         view
     }
@@ -534,16 +530,8 @@ impl RootView {
 
                     while let Ok(event) = this.tray_events.try_recv() {
                         match event {
-                            tray::TrayEvent::Show => {
-                                let _ = this.window_handle.update(cx, |_, window, _| {
-                                    window.activate_window();
-                                });
-                            }
-                            tray::TrayEvent::Quit => {
-                                let _ = this.window_handle.update(cx, |_, window, _| {
-                                    window.remove_window();
-                                });
-                            }
+                            tray::TrayEvent::Show => this.schedule_show_window(cx),
+                            tray::TrayEvent::Quit => this.quit_app(cx),
                         }
                     }
                     while let Ok(event) = this.media_events.try_recv() {
@@ -636,4 +624,8 @@ fn scroll_near_bottom(handle: &ScrollHandle, threshold: f32) -> bool {
     }
     let offset = -f32::from(handle.offset().y);
     offset >= (max - threshold).max(0.0)
+}
+
+pub(crate) fn background_enabled() -> bool {
+    tray::background_enabled()
 }
