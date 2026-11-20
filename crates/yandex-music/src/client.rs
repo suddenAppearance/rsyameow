@@ -5,7 +5,7 @@ use crate::auth::{
 };
 use crate::download::{DownloadInfo, DownloadedTrack, build_direct_link, select_best_mp3};
 use crate::http::Transport;
-use crate::models::{SearchResult, Status, Track, TracksList};
+use crate::models::{Playlist, SearchResult, Status, Track, TracksList};
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -266,6 +266,30 @@ impl Client {
             Err(Error::Unauthorized(message)) => Err(Error::DeviceAuth(message)),
             Err(error) => Err(error),
         }
+    }
+
+    // ------------------------------------------------------------- Playlists
+
+    /// Playlists of the current account.
+    pub fn playlists(&self) -> Result<Vec<Playlist>> {
+        let uid = self.require_uid()?;
+        self.user_playlists(uid)
+    }
+
+    /// Playlists of an arbitrary account (short representation without tracks).
+    pub fn user_playlists(&self, uid: u64) -> Result<Vec<Playlist>> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/users/{uid}/playlists/list"));
+        let playlists: Option<Vec<Playlist>> = self.inner.http.get(&url, &[], Some(&token))?;
+        Ok(playlists.unwrap_or_default())
+    }
+
+    /// A single playlist with its tracks.
+    pub fn user_playlist(&self, uid: u64, kind: u64) -> Result<Playlist> {
+        let token = self.require_token()?;
+        let url = self.api_url(&format!("/users/{uid}/playlists/{kind}"));
+        let playlist: Option<Playlist> = self.inner.http.get(&url, &[], Some(&token))?;
+        playlist.ok_or_else(|| Error::NotFound(format!("playlist {uid}:{kind}")))
     }
 
     // -------------------------------------------------------------- Account

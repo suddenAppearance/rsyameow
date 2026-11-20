@@ -4,7 +4,9 @@ use gpui::Image;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
-use yandex_music::{Account, Artist, Permissions, Plus, Status, Subscription, Track, TrackShort};
+use yandex_music::{
+    Account, Artist, Permissions, Playlist, Plus, Status, Subscription, Track, TrackShort, User,
+};
 
 /// Fictional listeners and tracks. They are intentionally not tied to real
 /// artists so that the demo cannot be mistaken for live Yandex data.
@@ -125,6 +127,70 @@ pub fn tracks() -> Vec<Track> {
             "После ужина",
             312_000,
             2024,
+        ),
+    ]
+}
+
+fn make_playlist(
+    kind: u64,
+    title: &str,
+    description: &str,
+    visibility: &str,
+    tracks: &[Track],
+) -> Playlist {
+    let duration_ms = tracks
+        .iter()
+        .map(|track| track.duration_ms.unwrap_or(0))
+        .sum::<u64>();
+
+    Playlist {
+        uid: Some(100042),
+        kind: Some(kind),
+        title: Some(title.into()),
+        track_count: Some(tracks.len() as u64),
+        visibility: Some(visibility.into()),
+        description: Some(description.into()),
+        cover: None,
+        og_image: None,
+        owner: Some(User {
+            uid: Some(100042),
+            login: Some("demo@rsyameow".into()),
+            display_name: Some("Демид Кот".into()),
+            full_name: Some("Демид Кот".into()),
+        }),
+        tracks: liked(tracks),
+        duration_ms: Some(duration_ms),
+        generated_playlist_type: None,
+        created: None,
+        modified: None,
+        snapshot: Some(1),
+        playlist_uuid: Some(format!("demo-playlist-{kind}")),
+    }
+}
+
+/// Small fictional playlist library for the demo account.
+pub fn playlists(tracks: &[Track]) -> Vec<Playlist> {
+    vec![
+        make_playlist(
+            101,
+            "Ночная поездка",
+            "Трамваи, фонари и немного меланхолии.",
+            "public",
+            &[tracks[0].clone(), tracks[1].clone(), tracks[4].clone()],
+        ),
+        make_playlist(
+            102,
+            "Утро на кухне",
+            "Кофе, окно и медленные треки.",
+            "public",
+            &[tracks[3].clone(), tracks[5].clone(), tracks[6].clone()],
+        ),
+        make_playlist(
+            103,
+            "Всё подряд",
+            "Личная коллекция демо-кота.",
+            "private",
+            tracks,
         ),
     ]
 }

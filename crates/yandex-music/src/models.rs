@@ -393,6 +393,100 @@ pub struct SearchResult<T> {
     pub results: Vec<T>,
 }
 
+/// A Yandex Music user (playlist owner, search result, ...).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    #[serde(default, deserialize_with = "de_opt_u64")]
+    pub uid: Option<u64>,
+    #[serde(default)]
+    pub login: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub full_name: Option<String>,
+}
+
+/// A user playlist. The `/playlists/list` endpoint returns playlists without
+/// tracks, while `/users/{uid}/playlists/{kind}` includes them.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    #[serde(default)]
+    pub uid: Option<u64>,
+    #[serde(default)]
+    pub kind: Option<u64>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub track_count: Option<u64>,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cover: Option<Cover>,
+    #[serde(default)]
+    pub og_image: Option<String>,
+    #[serde(default)]
+    pub owner: Option<User>,
+    #[serde(default)]
+    pub tracks: Vec<TrackShort>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub generated_playlist_type: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
+    #[serde(default)]
+    pub modified: Option<String>,
+    #[serde(default)]
+    pub snapshot: Option<u64>,
+    #[serde(default)]
+    pub playlist_uuid: Option<String>,
+}
+
+impl Playlist {
+    /// Unique id in the `uid:kind` format.
+    pub fn playlist_id(&self) -> String {
+        match (self.uid, self.kind) {
+            (Some(uid), Some(kind)) => format!("{uid}:{kind}"),
+            _ => String::new(),
+        }
+    }
+
+    /// Playlist title with a fallback.
+    pub fn display_title(&self) -> &str {
+        self.title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or("Без названия")
+    }
+
+    /// URL of the playlist cover at the requested size.
+    pub fn cover_url(&self, size: u32) -> Option<String> {
+        self.cover
+            .as_ref()
+            .and_then(|cover| cover.url(size))
+            .or_else(|| {
+                self.og_image
+                    .as_deref()
+                    .filter(|uri| !uri.is_empty())
+                    .map(|uri| cover_url(uri, size))
+            })
+    }
+
+    /// Playlist duration.
+    pub fn duration(&self) -> Duration {
+        Duration::from_millis(self.duration_ms.unwrap_or(0))
+    }
+
+    /// Whether the playlist is visible to everyone.
+    pub fn is_public(&self) -> bool {
+        self.visibility.as_deref() == Some("public")
+    }
+}
+
 /// The user's library of liked tracks.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

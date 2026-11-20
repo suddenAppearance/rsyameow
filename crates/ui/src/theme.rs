@@ -171,6 +171,8 @@ pub mod icons {
     pub const HEART: &str = "icons/heart.svg";
     pub const HEART_OUTLINE: &str = "icons/heart-outline.svg";
     pub const SEARCH: &str = "icons/search.svg";
+    pub const PLAYLIST: &str = "icons/playlist.svg";
+    pub const CHEVRON_LEFT: &str = "icons/chevron-left.svg";
     pub const VOLUME: &str = "icons/volume.svg";
     pub const VOLUME_MUTED: &str = "icons/volume-muted.svg";
     pub const MUSIC: &str = "icons/music.svg";

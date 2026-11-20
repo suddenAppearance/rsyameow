@@ -448,3 +448,83 @@ fn like_and_unlike_tracks_use_expected_endpoints() {
         ]
     );
 }
+
+#[test]
+fn playlists_list_and_detail_are_parsed() {
+    let server = TestServer::start(|request| {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/users/42/playlists/list") => {
+                assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+                MockResponse::json(
+                    200,
+                    json!({
+                        "result": [
+                            {
+                                "uid": 42,
+                                "kind": 7,
+                                "title": "Дорога домой",
+                                "trackCount": 2,
+                                "visibility": "public",
+                                "durationMs": 441000,
+                                "cover": {
+                                    "type": "cover",
+                                    "itemsUri": ["avatars.yandex.net/get-music-user-playlist/1/%%"]
+                                },
+                                "owner": {"uid": 42, "login": "listener"}
+                            },
+                            {
+                                "uid": 42,
+                                "kind": 8,
+                                "title": "Приватный",
+                                "trackCount": 0,
+                                "visibility": "private"
+                            }
+                        ]
+                    }),
+                )
+            }
+            ("GET", "/users/42/playlists/7") => MockResponse::json(
+                200,
+                json!({
+                    "result": {
+                        "uid": 42,
+                        "kind": 7,
+                        "title": "Дорога домой",
+                        "trackCount": 2,
+                        "durationMs": 441000,
+                        "tracks": [
+                            {"id": 101, "albumId": "555", "timestamp": "2026-01-01T00:00:00"},
+                            {"id": "102", "timestamp": "2026-01-02T00:00:00"}
+                        ]
+                    }
+                }),
+            ),
+            other => panic!("unexpected request: {other:?}"),
+        }
+    });
+
+    let client = client_for(&server, Some("test-token"));
+    let playlists = client.user_playlists(42).unwrap();
+    assert_eq!(playlists.len(), 2);
+    assert_eq!(playlists[0].playlist_id(), "42:7");
+    assert_eq!(playlists[0].display_title(), "Дорога домой");
+    assert_eq!(playlists[0].track_count, Some(2));
+    assert!(playlists[0].is_public());
+    assert_eq!(
+        playlists[0].cover_url(200).as_deref(),
+        Some("https://avatars.yandex.net/get-music-user-playlist/1/200x200")
+    );
+    assert_eq!(
+        playlists[0]
+            .owner
+            .as_ref()
+            .and_then(|owner| owner.login.as_deref()),
+        Some("listener")
+    );
+    assert_eq!(playlists[0].duration(), Duration::from_secs(441));
+
+    let full = client.user_playlist(42, 7).unwrap();
+    assert_eq!(full.tracks.len(), 2);
+    assert_eq!(full.tracks[0].track_id(), "101:555");
+    assert_eq!(full.tracks[1].track_id(), "102");
+}

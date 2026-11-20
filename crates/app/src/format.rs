@@ -16,6 +16,15 @@ pub fn duration(value: Duration) -> String {
     }
 }
 
+/// Like [`duration`], but renders a zero duration as a dash.
+pub fn duration_or_dash(value: Duration) -> String {
+    if value.is_zero() {
+        "—".to_string()
+    } else {
+        duration(value)
+    }
+}
+
 /// Format a number with narrow spaces as thousands separators.
 pub fn count(value: u64) -> String {
     let raw = value.to_string();
@@ -66,6 +75,7 @@ mod tests {
         assert_eq!(duration(Duration::from_secs(0)), "0:00");
         assert_eq!(duration(Duration::from_secs(65)), "1:05");
         assert_eq!(duration(Duration::from_secs(3661)), "1:01:01");
+        assert_eq!(duration_or_dash(Duration::ZERO), "—");
     }
 
     #[test]
