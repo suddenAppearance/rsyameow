@@ -168,9 +168,6 @@ fn main() {
                 cx.new(|cx| RootView::new(demo, token, window, cx))
             })
             .expect("failed to open the main window");
-            if app::background_enabled() {
-                app::keep_alive::ensure(cx);
-            }
 
             cx.activate(true);
         });

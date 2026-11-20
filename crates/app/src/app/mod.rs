@@ -5,7 +5,6 @@ mod artist;
 mod auth;
 mod cover_art;
 mod demo_mode;
-pub(crate) mod keep_alive;
 mod likes;
 mod media;
 mod navigation;
@@ -19,7 +18,6 @@ mod state;
 #[cfg(test)]
 mod tests;
 mod track;
-mod tray;
 mod wave;
 
 pub(crate) use cover_art::{cover_palette, decode_image, default_palette, error_text};
@@ -327,8 +325,6 @@ pub struct RootView {
     state_save_epoch: u64,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) window_handle: AnyWindowHandle,
-    pub(crate) tray_handle: Option<ksni::blocking::Handle<tray::AppTray>>,
-    tray_events: std::sync::mpsc::Receiver<tray::TrayEvent>,
     media_controls: Option<souvlaki::MediaControls>,
     media_events: std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>,
     media_track_key: Option<String>,
@@ -379,7 +375,6 @@ impl RootView {
         let focus_handle = cx.focus_handle();
         let window_handle = window.window_handle();
         let (media_controls, media_events) = media::init_media_controls();
-        let (tray_handle, tray_events) = tray::spawn_tray();
         let viewport = window.viewport_size();
         let playback_settings = config::load_playback_settings();
         let volume = playback_settings.volume;
@@ -465,8 +460,6 @@ impl RootView {
             state_save_epoch: 0,
             focus_handle,
             window_handle,
-            tray_handle,
-            tray_events,
             media_controls,
             media_events,
             media_track_key: None,
@@ -484,10 +477,6 @@ impl RootView {
             view.load_profile(cx);
         }
 
-        if view.tray_handle.is_some() {
-            tray::set_background(true);
-            tray::retain_root(cx.entity());
-        }
         window.focus(&view.focus_handle);
         view
     }
@@ -528,12 +517,6 @@ impl RootView {
                         this.animation_phase = this.animation_phase.wrapping_add(1);
                     }
 
-                    while let Ok(event) = this.tray_events.try_recv() {
-                        match event {
-                            tray::TrayEvent::Show => this.schedule_show_window(cx),
-                            tray::TrayEvent::Quit => this.quit_app(cx),
-                        }
-                    }
                     while let Ok(event) = this.media_events.try_recv() {
                         this.handle_media_event(event, cx);
                     }
@@ -626,6 +609,8 @@ fn scroll_near_bottom(handle: &ScrollHandle, threshold: f32) -> bool {
     offset >= (max - threshold).max(0.0)
 }
 
-pub(crate) fn background_enabled() -> bool {
-    tray::background_enabled()
+impl RootView {
+    pub(crate) fn close_window(&mut self, window: &mut gpui::Window, _cx: &mut Context<Self>) {
+        window.remove_window();
+    }
 }

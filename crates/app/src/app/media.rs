@@ -78,8 +78,16 @@ impl RootView {
             MediaControlEvent::SetVolume(volume) => {
                 self.set_volume(volume.clamp(0.0, 1.0) as f32, cx);
             }
-            MediaControlEvent::Raise => self.schedule_show_window(cx),
-            MediaControlEvent::Quit => self.quit_app(cx),
+            MediaControlEvent::Raise => {
+                let _ = self.window_handle.update(cx, |_, window, _| {
+                    window.activate_window();
+                });
+            }
+            MediaControlEvent::Quit => {
+                let _ = self.window_handle.update(cx, |_, window, _| {
+                    window.remove_window();
+                });
+            }
             _ => {}
         }
     }

@@ -24,4 +24,3 @@ serde_json.workspace = true
 thiserror.workspace = true
 yandex-music = { path = "../yandex-music" }
 souvlaki = { version = "0.9.3", default-features = false, features = ["use_zbus"] }
-ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
