@@ -117,6 +117,9 @@ pub struct RootView {
     pub(crate) playback_epoch: u64,
     pub(crate) queue: Vec<String>,
     pub(crate) queue_index: Option<usize>,
+    pub(crate) queue_open: bool,
+    pub(crate) queue_track_cache: HashMap<String, Track>,
+    queue_fetching: bool,
     pub(crate) volume: f32,
     previous_volume: f32,
     pub(crate) like_busy: bool,
@@ -192,6 +195,9 @@ impl RootView {
             playback_epoch: 0,
             queue: Vec::new(),
             queue_index: None,
+            queue_open: false,
+            queue_track_cache: HashMap::new(),
+            queue_fetching: false,
             volume,
             previous_volume: if volume > 0.0 { volume } else { 0.85 },
             like_busy: false,
@@ -466,6 +472,9 @@ impl RootView {
         self.covers.clear();
         self.queue.clear();
         self.queue_index = None;
+        self.queue_open = false;
+        self.queue_track_cache.clear();
+        self.queue_fetching = false;
         self.like_busy = false;
         self.player.reset();
         self.device = None;
@@ -493,6 +502,9 @@ impl RootView {
         self.covers.clear();
         self.queue.clear();
         self.queue_index = None;
+        self.queue_open = false;
+        self.queue_track_cache.clear();
+        self.queue_fetching = false;
         self.like_busy = false;
         self.reset_playlists();
         self.audio.stop();
@@ -638,6 +650,9 @@ impl RootView {
         self.pending_save_token = None;
         self.queue.clear();
         self.queue_index = None;
+        self.queue_open = false;
+        self.queue_track_cache.clear();
+        self.queue_fetching = false;
         self.like_busy = false;
         self.player.reset();
         self.search = SearchState::default();
@@ -657,6 +672,7 @@ impl RootView {
     }
 
     fn start_demo_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        self.cache_track(&track);
         self.playback_epoch += 1;
         self.player.track = Some(track.clone());
         self.player.cover = self.covers.get(&track.id).cloned();
@@ -786,6 +802,9 @@ impl RootView {
         }
 
         let results = self.search.results.clone();
+        for item in &results {
+            self.cache_track(item);
+        }
         self.queue = results.iter().map(Track::full_id).collect();
         self.queue_index = results.iter().position(|item| item.id == track.id);
 
@@ -1155,6 +1174,9 @@ impl RootView {
         }
 
         let tracks = self.playlists.tracks.clone();
+        for item in &tracks {
+            self.cache_track(item);
+        }
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = tracks.iter().position(|item| item.id == track.id);
 
@@ -1173,6 +1195,9 @@ impl RootView {
             cx.notify();
             return;
         }
+        for item in &tracks {
+            self.cache_track(item);
+        }
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = None;
         self.play_queue_index(0, cx);
@@ -1185,10 +1210,105 @@ impl RootView {
             cx.notify();
             return;
         }
+        for item in &tracks {
+            self.cache_track(item);
+        }
         self.queue = tracks.iter().map(Track::full_id).collect();
         self.queue_index = None;
         let index = rand::rng().random_range(0..tracks.len());
         self.play_queue_index(index, cx);
+    }
+
+    // -------------------------------------------------------------------- Queue
+
+    pub(crate) fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+        self.queue_open = !self.queue_open;
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn close_queue(&mut self, cx: &mut Context<Self>) {
+        self.queue_open = false;
+        cx.notify();
+    }
+
+    fn cache_track(&mut self, track: &Track) {
+        self.queue_track_cache
+            .insert(track.id.clone(), track.clone());
+        self.queue_track_cache
+            .insert(track.full_id(), track.clone());
+    }
+
+    /// Slice of the queue shown in the side panel.
+    pub(crate) fn queue_window(&self) -> (usize, usize) {
+        let len = self.queue.len();
+        if len == 0 {
+            return (0, 0);
+        }
+        if len <= 40 {
+            return (0, len);
+        }
+        let center = self.queue_index.unwrap_or(0).min(len - 1);
+        let start = center.saturating_sub(2);
+        let end = (start + 40).min(len);
+        (start, end)
+    }
+
+    fn fetch_queue_tracks(&mut self, cx: &mut Context<Self>) {
+        if self.demo {
+            if let Some(profile) = self.profile.as_ref() {
+                let sample = profile.sample.clone();
+                for track in &sample {
+                    self.cache_track(track);
+                }
+            }
+            return;
+        }
+        if self.queue_fetching || self.client.token().is_none() {
+            return;
+        }
+
+        let (start, end) = self.queue_window();
+        let missing: Vec<String> = self.queue[start..end]
+            .iter()
+            .filter(|id| !self.queue_track_cache.contains_key(*id))
+            .take(30)
+            .cloned()
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+
+        self.queue_fetching = true;
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.tracks(missing) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.queue_fetching = false;
+                if let Ok(tracks) = result {
+                    for track in &tracks {
+                        this.cache_track(track);
+                    }
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn play_queue_at(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.queue.len() {
+            return;
+        }
+        self.play_queue_index(index, cx);
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
     }
 
     // ----------------------------------------------------------------- Playback
@@ -1244,6 +1364,9 @@ impl RootView {
                 .iter()
                 .find(|track| track.id == id || track.full_id() == id)
                 .cloned();
+            if let Some(track) = &track {
+                self.cache_track(track);
+            }
             match track {
                 Some(track) => self.start_demo_track(track, cx),
                 None => {
@@ -1259,6 +1382,9 @@ impl RootView {
             .iter()
             .find(|track| track.id == id || track.full_id() == id)
             .cloned();
+        if let Some(track) = &known {
+            self.cache_track(track);
+        }
         self.load_and_play(known, id, cx);
     }
 
@@ -1274,6 +1400,9 @@ impl RootView {
 
         let index = rand::rng().random_range(0..self.queue.len());
         self.play_queue_index(index, cx);
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
     }
 
     pub(crate) fn play_next(&mut self, cx: &mut Context<Self>) {
@@ -1284,6 +1413,9 @@ impl RootView {
 
         let index = step_index(self.queue_index, self.queue.len(), true);
         self.play_queue_index(index, cx);
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
     }
 
     pub(crate) fn play_previous(&mut self, cx: &mut Context<Self>) {
@@ -1294,9 +1426,13 @@ impl RootView {
 
         let index = step_index(self.queue_index, self.queue.len(), false);
         self.play_queue_index(index, cx);
+        if self.queue_open {
+            self.fetch_queue_tracks(cx);
+        }
     }
 
     pub(crate) fn play_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        self.cache_track(&track);
         let same_track = self
             .player
             .track
@@ -1380,6 +1516,7 @@ impl RootView {
                             this.player.cover = Some(image);
                         }
 
+                        this.cache_track(&track);
                         this.player.track = Some(track.clone());
                         this.player.position = Duration::ZERO;
                         this.player.quality = Some(format!(

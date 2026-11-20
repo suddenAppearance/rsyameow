@@ -27,7 +27,9 @@ pub struct PlayerBar {
     volume: f32,
     compact: bool,
     liked: bool,
+    queue_open: bool,
     on_like: Option<ClickHandler>,
+    on_queue: Option<ClickHandler>,
     on_mute: Option<ClickHandler>,
     on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
@@ -52,7 +54,9 @@ impl PlayerBar {
             volume: 0.85,
             compact: false,
             liked: false,
+            queue_open: false,
             on_like: None,
+            on_queue: None,
             on_mute: None,
             on_volume: None,
             on_toggle: None,
@@ -130,6 +134,19 @@ impl PlayerBar {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_like = Some(Box::new(handler));
+        self
+    }
+
+    pub fn queue_open(mut self, open: bool) -> Self {
+        self.queue_open = open;
+        self
+    }
+
+    pub fn on_queue(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_queue = Some(Box::new(handler));
         self
     }
 
@@ -347,6 +364,18 @@ impl RenderOnce for PlayerBar {
             like = like.on_click(handler);
         }
 
+        let mut queue = IconButton::new("player-queue", icons::QUEUE)
+            .size(34.0)
+            .icon_size(16.0)
+            .variant(if self.queue_open {
+                ButtonVariant::Soft
+            } else {
+                ButtonVariant::Ghost
+            });
+        if let Some(handler) = self.on_queue {
+            queue = queue.on_click(handler);
+        }
+
         let controls = gpui::div()
             .flex()
             .items_center()
@@ -354,7 +383,8 @@ impl RenderOnce for PlayerBar {
             .child(previous)
             .child(toggle)
             .child(next)
-            .child(like);
+            .child(like)
+            .child(queue);
 
         let progress_row = gpui::div()
             .w_full()
