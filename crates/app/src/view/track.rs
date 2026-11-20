@@ -369,23 +369,16 @@ impl RootView {
                 );
             }
 
-            let mut card = glass_card(theme).relative().overflow_hidden();
+            let mut card = glass_card(theme);
             if collapsed {
-                // The fade is a child of the whole card so it extends behind
-                // the card padding and the footer, not just the text block.
-                card = card.child(
-                    div()
-                        .absolute()
-                        .left(px(-20.0))
-                        .right(px(-20.0))
-                        .bottom(px(-20.0))
-                        .h(px(200.0))
-                        .bg(linear_gradient(
-                            180.0,
-                            linear_color_stop(rgba(0x0A0A0A00), 0.0),
-                            linear_color_stop(rgba(0x0A0A0AFA), 1.0),
-                        )),
-                );
+                // Use the card background itself for the fade so the gradient
+                // follows the container's rounded corners instead of sitting
+                // on top of them as an extra rectangular layer.
+                card = card.bg(linear_gradient(
+                    180.0,
+                    linear_color_stop(rgba(0x0808088C), 0.0),
+                    linear_color_stop(rgba(0x050505FA), 1.0),
+                ));
             }
             card = card
                 .child(section_title(theme, "Текст трека"))
