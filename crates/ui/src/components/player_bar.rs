@@ -1,14 +1,16 @@
 use crate::theme::{Theme, icons, space, text};
 use gpui::{
-    App, ClickEvent, FontWeight, Image, ImageSource, IntoElement, ObjectFit, RenderOnce,
-    SharedString, Window, img, prelude::*, px,
+    App, Bounds, ClickEvent, FontWeight, Image, ImageSource, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, RenderOnce, SharedString, Window,
+    canvas, img, prelude::*, px, relative,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, SeekBar, Slider};
+use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Slider};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
+type SeekHoverHandler = Arc<dyn Fn(Option<f32>, &mut Window, &mut App) + 'static>;
 type VolumeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 
 /// The persistent playback bar at the bottom of the window.
@@ -40,6 +42,10 @@ pub struct PlayerBar {
     on_next: Option<ClickHandler>,
     on_seek: Option<SeekHandler>,
     on_seek_preview: Option<SeekHandler>,
+    on_seek_hover: Option<SeekHoverHandler>,
+    seek_hover: Option<f32>,
+    seek_preview: Option<f32>,
+    seek_time: Option<SharedString>,
 }
 
 impl PlayerBar {
@@ -71,6 +77,10 @@ impl PlayerBar {
             on_next: None,
             on_seek: None,
             on_seek_preview: None,
+            on_seek_hover: None,
+            seek_hover: None,
+            seek_preview: None,
+            seek_time: None,
         }
     }
 
@@ -228,6 +238,142 @@ impl PlayerBar {
         self.on_seek_preview = Some(Arc::new(handler));
         self
     }
+
+    pub fn on_seek_hover(
+        mut self,
+        handler: impl Fn(Option<f32>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_seek_hover = Some(Arc::new(handler));
+        self
+    }
+
+    pub fn seek_hover(mut self, fraction: Option<f32>) -> Self {
+        self.seek_hover = fraction;
+        self
+    }
+
+    pub fn seek_preview(mut self, fraction: Option<f32>) -> Self {
+        self.seek_preview = fraction;
+        self
+    }
+
+    pub fn seek_time(mut self, time: Option<SharedString>) -> Self {
+        self.seek_time = time;
+        self
+    }
+}
+
+fn seek_surface(
+    on_hover: Option<SeekHoverHandler>,
+    on_preview: Option<SeekHandler>,
+    on_commit: Option<SeekHandler>,
+) -> gpui::Stateful<gpui::Div> {
+    let bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
+    let bounds_for_canvas = bounds.clone();
+    let bounds_for_move = bounds.clone();
+    let bounds_for_down = bounds.clone();
+    let bounds_for_up = bounds.clone();
+    let bounds_for_out = bounds;
+    let hover_for_leave = on_hover.clone();
+    let hover_for_move = on_hover;
+    let preview_for_down = on_preview.clone();
+    let preview_for_move = on_preview;
+    let commit_for_up = on_commit.clone();
+    let commit_for_out = on_commit;
+
+    gpui::div()
+        .id("player-seek-surface")
+        .absolute()
+        .top(px(0.0))
+        .left(px(0.0))
+        .size_full()
+        .cursor_pointer()
+        .on_hover(move |hovered, window, cx| {
+            if !hovered && let Some(handler) = hover_for_leave.as_ref() {
+                handler(None, window, cx);
+            }
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            move |event: &MouseDownEvent, window, cx| {
+                let Ok(bounds) = bounds_for_down.lock() else {
+                    return;
+                };
+                let Some(fraction) = seek_fraction(event.position.x, bounds.as_ref()) else {
+                    return;
+                };
+                if let Some(handler) = preview_for_down.as_ref() {
+                    handler(fraction, window, cx);
+                }
+            },
+        )
+        .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+            let Ok(bounds) = bounds_for_move.lock() else {
+                return;
+            };
+            let Some(fraction) = seek_fraction(event.position.x, bounds.as_ref()) else {
+                return;
+            };
+            if let Some(handler) = hover_for_move.as_ref() {
+                handler(Some(fraction), window, cx);
+            }
+            if event.dragging()
+                && let Some(handler) = preview_for_move.as_ref()
+            {
+                handler(fraction, window, cx);
+            }
+        })
+        .on_mouse_up(
+            MouseButton::Left,
+            move |event: &MouseUpEvent, window, cx| {
+                let Ok(bounds) = bounds_for_up.lock() else {
+                    return;
+                };
+                let Some(fraction) = seek_fraction(event.position.x, bounds.as_ref()) else {
+                    return;
+                };
+                if let Some(handler) = commit_for_up.as_ref() {
+                    handler(fraction, window, cx);
+                }
+            },
+        )
+        .on_mouse_up_out(
+            MouseButton::Left,
+            move |event: &MouseUpEvent, window, cx| {
+                let Ok(bounds) = bounds_for_out.lock() else {
+                    return;
+                };
+                let Some(fraction) = seek_fraction(event.position.x, bounds.as_ref()) else {
+                    return;
+                };
+                if let Some(handler) = commit_for_out.as_ref() {
+                    handler(fraction, window, cx);
+                }
+            },
+        )
+        .child(
+            canvas(
+                move |bounds, _, _| {
+                    if let Ok(mut slot) = bounds_for_canvas.lock() {
+                        *slot = Some(bounds);
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .size_full(),
+        )
+}
+
+fn seek_fraction(event_x: gpui::Pixels, bounds: Option<&Bounds<gpui::Pixels>>) -> Option<f32> {
+    let bounds = bounds?;
+    let width = f32::from(bounds.size.width);
+    if width <= 0.0 {
+        return None;
+    }
+    Some(((f32::from(event_x) - f32::from(bounds.origin.x)) / width).clamp(0.0, 1.0))
 }
 
 impl Default for PlayerBar {
@@ -481,21 +627,7 @@ impl RenderOnce for PlayerBar {
                     .text_right()
                     .child(self.elapsed),
             )
-            .child({
-                let preview = self.on_seek_preview;
-                let commit = self.on_seek;
-                SeekBar::new(self.progress)
-                    .on_preview(move |fraction, window, cx| {
-                        if let Some(handler) = preview.as_ref() {
-                            handler(fraction, window, cx);
-                        }
-                    })
-                    .on_commit(move |fraction, window, cx| {
-                        if let Some(handler) = commit.as_ref() {
-                            handler(fraction, window, cx);
-                        }
-                    })
-            })
+            .child(ProgressBar::new(self.progress).height(3.0))
             .child(
                 gpui::div()
                     .w(px(38.0))
@@ -504,7 +636,9 @@ impl RenderOnce for PlayerBar {
                     .child(self.duration),
             );
 
-        let center = gpui::div()
+        let seek_active = self.seek_hover.is_some() || self.seek_preview.is_some();
+        let mut center = gpui::div()
+            .relative()
             .flex()
             .flex_col()
             .items_center()
@@ -513,10 +647,46 @@ impl RenderOnce for PlayerBar {
             .flex_1()
             .min_w(px(0.0))
             .h_full()
+            .rounded(px(12.0))
+            .hover(|style| style.bg(theme.colors.surface_hover))
             .border_r_1()
-            .border_color(theme.colors.border)
-            .child(controls)
-            .child(progress_row);
+            .border_color(theme.colors.border);
+
+        if seek_active {
+            center = center.bg(theme.colors.surface_hover);
+        }
+
+        center = center.child(seek_surface(
+            self.on_seek_hover,
+            self.on_seek_preview,
+            self.on_seek,
+        ));
+
+        center = center.child(controls).child(progress_row);
+
+        if let Some(time) = self.seek_time {
+            let fraction = self
+                .seek_preview
+                .or(self.seek_hover)
+                .unwrap_or(0.0)
+                .clamp(0.04, 0.86);
+            center = center.child(
+                gpui::div()
+                    .absolute()
+                    .top(px(-28.0))
+                    .left(relative(fraction))
+                    .rounded(px(999.0))
+                    .bg(gpui::rgba(0x111111F2))
+                    .border_1()
+                    .border_color(gpui::rgba(0xFFFFFF24))
+                    .px(px(space::SM))
+                    .py(px(3.0))
+                    .text_size(px(text::XS))
+                    .text_color(theme.colors.text)
+                    .whitespace_nowrap()
+                    .child(time),
+            );
+        }
 
         let compact = self.compact;
         let volume = self.volume;

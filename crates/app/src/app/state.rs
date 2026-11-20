@@ -325,6 +325,7 @@ impl RootView {
     ) {
         self.cache_track(&track);
         self.seek_preview = None;
+        self.seek_hover = None;
         self.lyrics_expanded = false;
         self.player.track = Some(track.clone());
         self.player.cover = self.covers.get(&track.id).cloned();

@@ -62,6 +62,7 @@ impl RootView {
     pub(crate) fn start_demo_track(&mut self, track: Track, cx: &mut Context<Self>) {
         self.audio.stop();
         self.seek_preview = None;
+        self.seek_hover = None;
         self.lyrics_expanded = false;
         self.cache_track(&track);
         self.playback_epoch += 1;

@@ -351,12 +351,24 @@ impl RootView {
         } else {
             format::duration(self.player.position)
         };
+        let seek_hover = self.seek_hover;
+        let tooltip_fraction = seek_preview.or(seek_hover);
+        let seek_time = tooltip_fraction.and_then(|fraction| {
+            track.as_ref().map(|track| {
+                SharedString::from(format!(
+                    "{} / {}",
+                    format::duration(track.duration().mul_f32(fraction)),
+                    format::duration(track.duration())
+                ))
+            })
+        });
         let artist_link = track
             .as_ref()
             .and_then(|track| track.artists.first().cloned());
 
         let view = cx.entity();
         let preview_view = cx.entity();
+        let hover_view = cx.entity();
         let volume_view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
@@ -407,6 +419,15 @@ impl RootView {
             .on_next(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.play_next(cx);
             }))
+            .seek_hover(seek_hover)
+            .seek_preview(seek_preview)
+            .seek_time(seek_time)
+            .on_seek_hover(move |fraction, _, cx| {
+                hover_view.update(cx, |this, cx| {
+                    this.seek_hover = fraction;
+                    cx.notify();
+                });
+            })
             .on_seek_preview(move |fraction, _, cx| {
                 preview_view.update(cx, |this, cx| {
                     this.seek_preview = Some(fraction);
