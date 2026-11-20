@@ -118,7 +118,6 @@ impl RootView {
                     .child(
                         div()
                             .w(px(420.0))
-                            .max_w(relative(0.82))
                             .pt(px(space::MD))
                             .flex()
                             .flex_col()
@@ -127,6 +126,7 @@ impl RootView {
                                 let preview_view = cx.entity();
                                 let commit_view = cx.entity();
                                 SeekBar::new(progress)
+                                    .width(420.0)
                                     .on_preview(move |fraction, _, cx| {
                                         preview_view.update(cx, |this, cx| {
                                             this.seek_preview = Some(fraction);

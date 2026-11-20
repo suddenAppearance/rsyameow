@@ -16,6 +16,7 @@ type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct SeekBar {
     value: f32,
+    width: f32,
     on_preview: Option<SeekHandler>,
     on_commit: Option<SeekHandler>,
 }
@@ -24,9 +25,15 @@ impl SeekBar {
     pub fn new(value: f32) -> Self {
         Self {
             value: value.clamp(0.0, 1.0),
+            width: 420.0,
             on_preview: None,
             on_commit: None,
         }
+    }
+
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = width;
+        self
     }
 
     pub fn on_preview(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
@@ -40,9 +47,12 @@ impl SeekBar {
     }
 }
 
-fn fraction(event_x: gpui::Pixels, bounds: Option<&Bounds<gpui::Pixels>>) -> Option<f32> {
+fn fraction(
+    event_x: gpui::Pixels,
+    bounds: Option<&Bounds<gpui::Pixels>>,
+    width: f32,
+) -> Option<f32> {
     let bounds = bounds?;
-    let width = f32::from(bounds.size.width);
     if width <= 0.0 {
         return None;
     }
@@ -53,6 +63,7 @@ impl RenderOnce for SeekBar {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::get(cx);
         let value = self.value.clamp(0.0, 1.0);
+        let width = self.width;
         let track_bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
         let bounds_for_canvas = track_bounds.clone();
         let bounds_for_down = track_bounds.clone();
@@ -73,7 +84,8 @@ impl RenderOnce for SeekBar {
 
         gpui::div()
             .relative()
-            .flex_1()
+            .w(px(self.width))
+            .flex_shrink_0()
             .h(px(20.0))
             .flex()
             .items_center()
@@ -84,7 +96,7 @@ impl RenderOnce for SeekBar {
                     let Ok(bounds) = bounds_for_down.lock() else {
                         return;
                     };
-                    let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
+                    let Some(fraction) = fraction(event.position.x, bounds.as_ref(), width) else {
                         return;
                     };
                     dragging_for_down.set(true);
@@ -100,7 +112,7 @@ impl RenderOnce for SeekBar {
                 let Ok(bounds) = bounds_for_move.lock() else {
                     return;
                 };
-                let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
+                let Some(fraction) = fraction(event.position.x, bounds.as_ref(), width) else {
                     return;
                 };
                 if let Some(handler) = preview_for_move.as_ref() {
@@ -113,7 +125,7 @@ impl RenderOnce for SeekBar {
                     let Ok(bounds) = bounds_for_up.lock() else {
                         return;
                     };
-                    let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
+                    let Some(fraction) = fraction(event.position.x, bounds.as_ref(), width) else {
                         return;
                     };
                     if dragging_for_up.replace(false)
@@ -129,7 +141,7 @@ impl RenderOnce for SeekBar {
                     let Ok(bounds) = bounds_for_up_out.lock() else {
                         return;
                     };
-                    let Some(fraction) = fraction(event.position.x, bounds.as_ref()) else {
+                    let Some(fraction) = fraction(event.position.x, bounds.as_ref(), width) else {
                         return;
                     };
                     if dragging_for_up_out.replace(false)
