@@ -65,9 +65,17 @@ impl Render for RootView {
             Screen::Wave => self.wave_view(&theme, cx),
         };
 
+        let maximized = window.is_maximized();
+        let window_radius = if maximized { 0.0 } else { 14.0 };
+
         div()
             .relative()
             .size_full()
+            .rounded(px(window_radius))
+            .overflow_hidden()
+            .when(!maximized, |element| {
+                element.border_1().border_color(theme.colors.border)
+            })
             .flex()
             .flex_col()
             .track_focus(&self.focus_handle)

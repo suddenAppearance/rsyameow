@@ -103,6 +103,7 @@ impl RenderOnce for TrackRow {
         let cover = match self.cover {
             Some(image) => img(ImageSource::Image(image))
                 .size_full()
+                .rounded(px(6.0))
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),
             None => gpui::div()

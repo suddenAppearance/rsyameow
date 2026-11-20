@@ -14,8 +14,8 @@ use app::{
 };
 use assets::Assets;
 use gpui::{
-    App, AppContext as _, Application, Bounds, KeyBinding, SharedString, WindowBounds,
-    WindowDecorations, WindowOptions, px, size,
+    App, AppContext as _, Application, Bounds, KeyBinding, SharedString,
+    WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowOptions, px, size,
 };
 use rsyameow_ui::Theme;
 
@@ -154,6 +154,7 @@ fn main() {
                 // every compositor supports client-side decorations; on X11
                 // gpui falls back to server decorations when no compositor is
                 // present, and the header remains usable in both cases.
+                window_background: WindowBackgroundAppearance::Transparent,
                 window_decorations: Some(WindowDecorations::Client),
                 is_movable: true,
                 is_resizable: true,

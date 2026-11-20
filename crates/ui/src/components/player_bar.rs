@@ -432,6 +432,7 @@ impl RenderOnce for PlayerBar {
         let cover_content = match self.cover {
             Some(image) => img(ImageSource::Image(image))
                 .size_full()
+                .rounded(px(8.0))
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),
             None => gpui::div()

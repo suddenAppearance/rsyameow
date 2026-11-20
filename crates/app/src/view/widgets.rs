@@ -41,6 +41,7 @@ pub(crate) fn playlist_cover(theme: &Theme, image: Option<Arc<Image>>, height: f
     let content = match image {
         Some(image) => img(ImageSource::Image(image))
             .size_full()
+            .rounded(px(12.0))
             .object_fit(ObjectFit::Cover)
             .into_any_element(),
         None => div()
@@ -77,6 +78,7 @@ pub(crate) fn search_thumb(
     let content = match image {
         Some(image) => img(ImageSource::Image(image))
             .size_full()
+            .rounded(px(radius))
             .object_fit(ObjectFit::Cover)
             .into_any_element(),
         None => div()

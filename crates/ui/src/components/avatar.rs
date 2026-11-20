@@ -62,6 +62,7 @@ impl RenderOnce for Avatar {
         let inner = match self.image {
             Some(image) => img(ImageSource::Image(image))
                 .size_full()
+                .rounded_full()
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),
             None => gpui::div()
