@@ -109,7 +109,24 @@ fn main() {
             })
             .detach();
 
-            let bounds = Bounds::centered(None, size(px(1240.0), px(900.0)), cx);
+            let display = cx
+                .primary_display()
+                .map(|display| display.bounds().size)
+                .unwrap_or_else(|| size(px(1440.0), px(960.0)));
+            let display_width = f32::from(display.width);
+            let display_height = f32::from(display.height);
+            let max_width = (display_width - 80.0).max(960.0);
+            let max_height = (display_height - 80.0).max(640.0);
+            let (width, height) = config::load_window_size()
+                .map(|(width, height)| {
+                    (
+                        width.clamp(960.0, max_width),
+                        height.clamp(640.0, max_height),
+                    )
+                })
+                .unwrap_or_else(|| (1240.0f32.min(max_width), 900.0f32.min(max_height)));
+
+            let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(960.0), px(640.0))),

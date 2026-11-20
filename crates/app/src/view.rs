@@ -13,7 +13,17 @@ use rsyameow_ui::{
 use yandex_music::Status;
 
 impl Render for RootView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewport = window.viewport_size();
+        let width = f32::from(viewport.width);
+        let height = f32::from(viewport.height);
+        if (width - self.viewport_width).abs() > 1.0 || (height - self.viewport_height).abs() > 1.0
+        {
+            self.viewport_width = width;
+            self.viewport_height = height;
+            self.schedule_window_size_save(cx);
+        }
+
         let theme = Theme::get(cx).clone();
         let screen = self.screen.clone();
 
@@ -625,22 +635,28 @@ impl RootView {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(1180.0))
-                    .p(px(space::XL))
                     .flex()
-                    .flex_col()
-                    .gap(px(space::LG))
-                    .child(header)
-                    .child(hero)
-                    .child(details)
-                    .child(liked)
+                    .justify_center()
                     .child(
                         div()
-                            .pt(px(space::SM))
-                            .text_size(px(text::XS))
-                            .text_color(theme.colors.text_muted)
+                            .w_full()
+                            .max_w(px(1180.0))
+                            .p(px(space::XL))
+                            .flex()
+                            .flex_col()
+                            .gap(px(space::LG))
+                            .child(header)
+                            .child(hero)
+                            .child(details)
+                            .child(liked)
                             .child(
-                                "Неофициальный клиент Яндекс Музыки. Треки загружаются напрямую из API и не сохраняются на диск.",
+                                div()
+                                    .pt(px(space::SM))
+                                    .text_size(px(text::XS))
+                                    .text_color(theme.colors.text_muted)
+                                    .child(
+                                        "Неофициальный клиент Яндекс Музыки. Треки загружаются напрямую из API и не сохраняются на диск.",
+                                    ),
                             ),
                     ),
             )
@@ -885,13 +901,24 @@ impl RootView {
                     )),
             );
 
-        div()
-            .w_full()
-            .flex()
-            .gap(px(space::LG))
-            .child(div().flex_1().min_w(px(0.0)).child(account_card))
-            .child(div().flex_1().min_w(px(0.0)).child(subscription_card))
-            .into_any_element()
+        if self.viewport_width < 1120.0 {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(space::LG))
+                .child(account_card)
+                .child(subscription_card)
+                .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .flex()
+                .gap(px(space::LG))
+                .child(div().flex_1().min_w(px(0.0)).child(account_card))
+                .child(div().flex_1().min_w(px(0.0)).child(subscription_card))
+                .into_any_element()
+        }
     }
 
     fn liked_section(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {

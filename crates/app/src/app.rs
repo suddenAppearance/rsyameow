@@ -80,6 +80,9 @@ pub struct RootView {
     pub(crate) player: PlayerState,
     pub(crate) audio: AudioEngine,
     pub(crate) playback_epoch: u64,
+    pub(crate) viewport_width: f32,
+    pub(crate) viewport_height: f32,
+    window_size_epoch: u64,
     _token_subscription: Subscription,
     _ticker: Task<()>,
 }
@@ -88,7 +91,7 @@ impl RootView {
     pub fn new(
         demo_mode: bool,
         token: Option<String>,
-        _window: &mut gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let client = match &token {
@@ -107,6 +110,7 @@ impl RootView {
             });
 
         let ticker = Self::spawn_ticker(cx);
+        let viewport = window.viewport_size();
 
         let mut view = Self {
             screen: Screen::Login,
@@ -125,6 +129,9 @@ impl RootView {
             player: PlayerState::default(),
             audio: AudioEngine::new(),
             playback_epoch: 0,
+            viewport_width: f32::from(viewport.width),
+            viewport_height: f32::from(viewport.height),
+            window_size_epoch: 0,
             _token_subscription: token_subscription,
             _ticker: ticker,
         };
@@ -137,6 +144,24 @@ impl RootView {
         }
 
         view
+    }
+
+    /// Persist the window size after a short debounce, so dragging the window
+    /// edge does not write to disk on every frame.
+    pub(crate) fn schedule_window_size_save(&mut self, cx: &mut Context<Self>) {
+        self.window_size_epoch += 1;
+        let epoch = self.window_size_epoch;
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            Timer::after(Duration::from_millis(700)).await;
+            this.update(cx, |this, _| {
+                if this.window_size_epoch == epoch {
+                    let _ = config::save_window_size(this.viewport_width, this.viewport_height);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// A background task that advances the progress bar and detects the end of
@@ -396,7 +421,7 @@ impl RootView {
                     let ids: Vec<String> = liked
                         .tracks
                         .iter()
-                        .take(8)
+                        .take(24)
                         .map(TrackShort::track_id)
                         .collect();
                     let sample = if ids.is_empty() {
@@ -763,6 +788,14 @@ impl RootView {
             }
         }
         cx.notify();
+    }
+}
+
+impl Drop for RootView {
+    fn drop(&mut self) {
+        // A resize might happen immediately before the window is closed; make
+        // sure the latest size is not lost.
+        let _ = config::save_window_size(self.viewport_width, self.viewport_height);
     }
 }
 
