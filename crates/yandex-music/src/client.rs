@@ -365,6 +365,47 @@ impl Client {
 
     // ---------------------------------------------------------------- Likes
 
+    fn require_uid(&self) -> Result<u64> {
+        if let Some(uid) = self.cached_uid() {
+            return Ok(uid);
+        }
+        let status = self.init()?;
+        status
+            .account
+            .and_then(|account| account.uid)
+            .ok_or_else(|| Error::Decode("account status contains no uid".into()))
+    }
+
+    /// Like tracks.
+    ///
+    /// Calls [`Client::init`] automatically when the account id is not cached.
+    pub fn like_tracks(&self, track_ids: &[String]) -> Result<()> {
+        self.change_track_likes(track_ids, true)
+    }
+
+    /// Remove tracks from the likes.
+    pub fn unlike_tracks(&self, track_ids: &[String]) -> Result<()> {
+        self.change_track_likes(track_ids, false)
+    }
+
+    fn change_track_likes(&self, track_ids: &[String], liked: bool) -> Result<()> {
+        if track_ids.is_empty() {
+            return Ok(());
+        }
+
+        let token = self.require_token()?;
+        let uid = self.require_uid()?;
+        let action = if liked { "add-multiple" } else { "remove" };
+        let url = self.api_url(&format!("/users/{uid}/likes/tracks/{action}"));
+        let form: Vec<(&str, String)> = track_ids
+            .iter()
+            .map(|id| ("track-ids", id.clone()))
+            .collect();
+
+        let _: serde_json::Value = self.inner.http.post_form(&url, &form, Some(&token))?;
+        Ok(())
+    }
+
     /// Liked tracks of the current account.
     ///
     /// Calls [`Client::init`] automatically when the account id is not cached.

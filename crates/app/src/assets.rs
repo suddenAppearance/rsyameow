@@ -21,6 +21,7 @@ impl AssetSource for Assets {
             "icons/logout.svg" => asset!("icons/logout.svg"),
             "icons/user.svg" => asset!("icons/user.svg"),
             "icons/heart.svg" => asset!("icons/heart.svg"),
+            "icons/heart-outline.svg" => asset!("icons/heart-outline.svg"),
             "icons/search.svg" => asset!("icons/search.svg"),
             "icons/volume.svg" => asset!("icons/volume.svg"),
             "icons/volume-muted.svg" => asset!("icons/volume-muted.svg"),

@@ -1324,6 +1324,10 @@ impl RootView {
             .error(self.player.error.clone())
             .volume(self.volume)
             .compact(self.viewport_width < 1100.0)
+            .liked(self.is_current_liked())
+            .on_like(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.toggle_like(cx);
+            }))
             .on_mute(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.toggle_mute(cx);
             }))

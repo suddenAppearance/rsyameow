@@ -100,6 +100,7 @@ pub struct RootView {
     pub(crate) queue_index: Option<usize>,
     pub(crate) volume: f32,
     previous_volume: f32,
+    pub(crate) like_busy: bool,
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
@@ -172,6 +173,7 @@ impl RootView {
             queue_index: None,
             volume,
             previous_volume: if volume > 0.0 { volume } else { 0.85 },
+            like_busy: false,
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
@@ -443,6 +445,7 @@ impl RootView {
         self.covers.clear();
         self.queue.clear();
         self.queue_index = None;
+        self.like_busy = false;
         self.player.reset();
         self.device = None;
         self.auth_busy = false;
@@ -468,6 +471,7 @@ impl RootView {
         self.covers.clear();
         self.queue.clear();
         self.queue_index = None;
+        self.like_busy = false;
         self.audio.stop();
         cx.notify();
 
@@ -611,6 +615,7 @@ impl RootView {
         self.pending_save_token = None;
         self.queue.clear();
         self.queue_index = None;
+        self.like_busy = false;
         self.player.reset();
         self.search = SearchState::default();
         self.search_epoch += 1;
@@ -765,6 +770,130 @@ impl RootView {
         } else {
             let full_id = track.full_id();
             self.load_and_play(Some(track), full_id, cx);
+        }
+    }
+
+    // ------------------------------------------------------------------- Likes
+
+    pub(crate) fn is_current_liked(&self) -> bool {
+        self.player
+            .track
+            .as_ref()
+            .is_some_and(|track| self.is_track_liked(track))
+    }
+
+    fn is_track_liked(&self, track: &Track) -> bool {
+        let full_id = track.full_id();
+        self.profile.as_ref().is_some_and(|profile| {
+            profile
+                .liked
+                .iter()
+                .any(|short| short.id == track.id || short.track_id() == full_id)
+        })
+    }
+
+    pub(crate) fn toggle_like(&mut self, cx: &mut Context<Self>) {
+        if self.like_busy {
+            return;
+        }
+        let Some(track) = self.player.track.clone() else {
+            return;
+        };
+        let liked = self.is_track_liked(&track);
+
+        if self.demo {
+            self.apply_like_state(track, !liked);
+            cx.notify();
+            return;
+        }
+
+        if self.client.token().is_none() {
+            self.player.error = Some("Нужно войти в аккаунт.".into());
+            cx.notify();
+            return;
+        }
+
+        self.like_busy = true;
+        let client = self.client.clone();
+        let track_id = track.id.clone();
+        let track_for_ui = track.clone();
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    if liked {
+                        client.unlike_tracks(&[track_id])
+                    } else {
+                        client.like_tracks(&[track_id])
+                    }
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                this.like_busy = false;
+                match result {
+                    Ok(()) => this.apply_like_state(track_for_ui, !liked),
+                    Err(error) => this.player.error = Some(error_text(&error)),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn apply_like_state(&mut self, track: Track, liked: bool) {
+        let full_id = track.full_id();
+        let existing_cover = self.player.cover.clone();
+        let Some(profile) = self.profile.as_mut() else {
+            return;
+        };
+
+        let already_liked = profile
+            .liked
+            .iter()
+            .any(|short| short.id == track.id || short.track_id() == full_id);
+
+        if liked {
+            if !already_liked {
+                let album_id = track
+                    .albums
+                    .first()
+                    .and_then(|album| album.id)
+                    .map(|id| id.to_string());
+                profile.liked.insert(
+                    0,
+                    TrackShort {
+                        id: track.id.clone(),
+                        album_id,
+                        timestamp: None,
+                        play_count: None,
+                        recent: None,
+                        original_index: None,
+                        track: None,
+                    },
+                );
+                profile.total_liked += 1;
+            }
+
+            if !profile.sample.iter().any(|item| item.id == track.id) {
+                profile.sample.insert(0, track.clone());
+                profile.sample.truncate(24);
+            }
+        } else {
+            let before = profile.liked.len();
+            profile
+                .liked
+                .retain(|short| short.id != track.id && short.track_id() != full_id);
+            if profile.liked.len() < before {
+                profile.total_liked = profile.total_liked.saturating_sub(1);
+            }
+            profile.sample.retain(|item| item.id != track.id);
+        }
+
+        if liked && let Some(cover) = existing_cover {
+            self.covers.entry(track.id).or_insert(cover);
         }
     }
 

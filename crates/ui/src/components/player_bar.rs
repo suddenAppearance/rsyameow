@@ -26,6 +26,8 @@ pub struct PlayerBar {
     error: Option<SharedString>,
     volume: f32,
     compact: bool,
+    liked: bool,
+    on_like: Option<ClickHandler>,
     on_mute: Option<ClickHandler>,
     on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
@@ -49,6 +51,8 @@ impl PlayerBar {
             error: None,
             volume: 0.85,
             compact: false,
+            liked: false,
+            on_like: None,
             on_mute: None,
             on_volume: None,
             on_toggle: None,
@@ -113,6 +117,19 @@ impl PlayerBar {
     /// Hide non-essential controls in a narrow window.
     pub fn compact(mut self, compact: bool) -> Self {
         self.compact = compact;
+        self
+    }
+
+    pub fn liked(mut self, liked: bool) -> Self {
+        self.liked = liked;
+        self
+    }
+
+    pub fn on_like(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_like = Some(Box::new(handler));
         self
     }
 
@@ -309,13 +326,35 @@ impl RenderOnce for PlayerBar {
             next = next.on_click(handler);
         }
 
+        let mut like = IconButton::new(
+            "player-like",
+            if self.liked {
+                icons::HEART
+            } else {
+                icons::HEART_OUTLINE
+            },
+        )
+        .size(34.0)
+        .icon_size(16.0)
+        .variant(if self.liked {
+            ButtonVariant::Soft
+        } else {
+            ButtonVariant::Ghost
+        });
+        if !has_track || self.loading {
+            like = like.disabled(true);
+        } else if let Some(handler) = self.on_like {
+            like = like.on_click(handler);
+        }
+
         let controls = gpui::div()
             .flex()
             .items_center()
             .gap(px(space::SM))
             .child(previous)
             .child(toggle)
-            .child(next);
+            .child(next)
+            .child(like);
 
         let progress_row = gpui::div()
             .w_full()

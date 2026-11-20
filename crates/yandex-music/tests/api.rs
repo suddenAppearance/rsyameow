@@ -396,3 +396,55 @@ fn search_rejects_empty_queries_without_network_request() {
         other => panic!("expected BadRequest, got {other:?}"),
     }
 }
+
+#[test]
+fn like_and_unlike_tracks_use_expected_endpoints() {
+    let server = TestServer::start(|request| {
+        assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+        match request.path.as_str() {
+            "/account/status" => {
+                assert_eq!(request.method, "GET");
+                MockResponse::json(200, json!({"result": {"account": {"uid": 42}}}))
+            }
+            "/users/42/likes/tracks/add-multiple" => {
+                assert_eq!(request.method, "POST");
+                assert_eq!(
+                    request.form_values("track-ids"),
+                    vec!["101".to_string(), "102".to_string()]
+                );
+                MockResponse::json(200, json!({"result": {"revision": 18}}))
+            }
+            "/users/42/likes/tracks/remove" => {
+                assert_eq!(request.method, "POST");
+                assert_eq!(
+                    request.form_values("track-ids"),
+                    vec!["101".to_string(), "102".to_string()]
+                );
+                MockResponse::json(200, json!({"result": "ok"}))
+            }
+            other => panic!("unexpected path: {other}"),
+        }
+    });
+
+    let client = client_for(&server, Some("test-token"));
+    client
+        .like_tracks(&["101".to_string(), "102".to_string()])
+        .unwrap();
+    client
+        .unlike_tracks(&["101".to_string(), "102".to_string()])
+        .unwrap();
+
+    let requests = server.requests();
+    let paths: Vec<&str> = requests
+        .iter()
+        .map(|request| request.path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/account/status",
+            "/users/42/likes/tracks/add-multiple",
+            "/users/42/likes/tracks/remove"
+        ]
+    );
+}
