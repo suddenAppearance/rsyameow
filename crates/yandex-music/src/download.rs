@@ -1,18 +1,34 @@
 //! Track download information and direct link construction.
 //!
-//! The API returns a set of [`DownloadInfo`] entries. Each entry points to a
-//! small XML document containing the storage host, the file path, a timestamp
-//! and a signature. The direct MP3 URL is reconstructed exactly like the
-//! official clients do:
+//! The legacy API returns a set of [`DownloadInfo`] entries. Each entry points
+//! to a small XML document containing the storage host, the file path, a
+//! timestamp and a signature. The direct MP3 URL is reconstructed exactly like
+//! the official clients do:
 //!
 //! ```text
 //! sign = md5(SALT + path.without_leading_slash() + s)
 //! url  = https://{host}/get-mp3/{sign}/{ts}{path}
 //! ```
+//!
+//! For lossless playback the client uses the signed `/get-file-info` endpoint
+//! instead. It returns a direct URL and is signed with HMAC-SHA256 over
+//! timestamp, track id, quality, codecs and transport.
 
 use crate::{Error, Result};
+use base64::Engine as _;
+use hmac::{Hmac, Mac};
 use md5::{Digest, Md5};
 use serde::Deserialize;
+use sha2::Sha256;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Key used by the desktop client to sign `/get-file-info` requests.
+pub const FILE_INFO_SIGN_KEY: &str = "kzqU4XhfCaY6B6JTHODeq5";
+/// Client header tied to [`FILE_INFO_SIGN_KEY`].
+pub const FILE_INFO_CLIENT: &str = "YandexMusicDesktopAppWindows/5.95.0";
+/// Codecs requested for lossless playback. Raw FLAC is preferred; MP3 is the
+/// fallback when the track or account has no lossless version.
+pub const FILE_INFO_CODECS: &[&str] = &["flac", "flac-mp4", "mp3"];
 
 /// Salt used by Yandex to sign direct download URLs.
 pub const SIGN_SALT: &str = "XGRlBW9FXlekgbPrRHuSiA";
@@ -46,10 +62,130 @@ impl DownloadInfo {
     }
 }
 
+/// Response of the signed `/get-file-info` endpoint.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileInfo {
+    #[serde(default)]
+    pub download_info: Option<FileDownloadInfo>,
+}
+
+/// One direct file variant returned by `/get-file-info`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDownloadInfo {
+    /// `lossless`, `hq` or `nq`.
+    #[serde(default)]
+    pub quality: String,
+    /// `flac`, `flac-mp4`, `aac`, `mp3`, ...
+    #[serde(default)]
+    pub codec: String,
+    /// Bitrate in kilobits per second (`0` for some MP4 containers).
+    #[serde(default)]
+    pub bitrate: u32,
+    /// `raw` or `encraw`.
+    #[serde(default)]
+    pub transport: String,
+    /// Direct URL of the file.
+    #[serde(default)]
+    pub url: String,
+    /// Mirrors of [`Self::url`].
+    #[serde(default)]
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub gain: bool,
+}
+
+impl FileDownloadInfo {
+    /// First usable direct URL.
+    pub fn direct_url(&self) -> Option<&str> {
+        if !self.url.is_empty() {
+            Some(&self.url)
+        } else {
+            self.urls
+                .iter()
+                .find(|url| !url.is_empty())
+                .map(String::as_str)
+        }
+    }
+
+    /// Whether this variant is raw FLAC.
+    pub fn is_lossless(&self) -> bool {
+        self.codec.eq_ignore_ascii_case("flac") || self.codec.eq_ignore_ascii_case("flac-mp4")
+    }
+
+    /// Whether the variant can be decoded by rodio without extra decryption.
+    pub fn is_playable(&self) -> bool {
+        let raw = !self.transport.eq_ignore_ascii_case("encraw");
+        let codec = self.codec.eq_ignore_ascii_case("flac")
+            || self.codec.eq_ignore_ascii_case("flac-mp4")
+            || self.codec.eq_ignore_ascii_case("mp3");
+        raw && codec && self.direct_url().is_some()
+    }
+}
+
+impl FileInfo {
+    /// The direct variant suitable for playback.
+    pub fn playable(&self) -> Option<&FileDownloadInfo> {
+        self.download_info
+            .as_ref()
+            .filter(|info| info.is_playable())
+    }
+}
+
+/// Sign `/get-file-info` at a fixed timestamp (used by tests and the client).
+pub fn file_info_sign_at(
+    track_id: &str,
+    quality: &str,
+    codecs: &[&str],
+    transport: &str,
+    timestamp: u64,
+    key: &str,
+) -> String {
+    type HmacSha256 = Hmac<Sha256>;
+
+    let message = format!(
+        "{timestamp}{track_id}{quality}{}{transport}",
+        codecs.concat()
+    );
+    let mut mac =
+        HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC accepts keys of any length");
+    mac.update(message.as_bytes());
+    let digest = mac.finalize().into_bytes();
+
+    // The Python library strips the trailing `=` from padded base64. For a
+    // 32-byte SHA-256 digest this is exactly unpadded base64.
+    base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)
+}
+
+/// Sign `/get-file-info` for the current Unix timestamp.
+pub fn file_info_sign(
+    track_id: &str,
+    quality: &str,
+    codecs: &[&str],
+    transport: &str,
+) -> Result<(u64, String)> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| Error::Decode(format!("system clock is before Unix epoch: {error}")))?
+        .as_secs();
+    Ok((
+        timestamp,
+        file_info_sign_at(
+            track_id,
+            quality,
+            codecs,
+            transport,
+            timestamp,
+            FILE_INFO_SIGN_KEY,
+        ),
+    ))
+}
+
 /// A track downloaded into memory, ready to be handed to an audio decoder.
 #[derive(Debug, Clone)]
 pub struct DownloadedTrack {
-    /// Raw MP3 bytes.
+    /// Raw audio bytes (MP3 or FLAC).
     pub bytes: Vec<u8>,
     /// Signed URL the bytes were downloaded from.
     pub direct_url: String,
@@ -179,5 +315,66 @@ mod tests {
             direct: false,
         }];
         assert_eq!(select_best_mp3(&infos).unwrap().bitrate_in_kbps, 192);
+    }
+
+    #[test]
+    fn signs_file_info_with_desktop_key() {
+        let sign = file_info_sign_at(
+            "4784420:100500",
+            "lossless",
+            &["flac", "aac", "mp3"],
+            "encraw",
+            1668687184,
+            "SUPER_SECRET_KEY",
+        );
+        assert_eq!(sign, "YH39qNGT90cOfpuP1sJgexVzcthU6SPLf9nSkbJnecQ");
+        assert!(!sign.ends_with('='));
+    }
+
+    #[test]
+    fn parses_lossless_file_info_and_urls() {
+        let json = r#"{
+            "downloadInfo": {
+                "quality": "lossless",
+                "codec": "flac",
+                "bitrate": 0,
+                "transport": "raw",
+                "url": "",
+                "urls": ["https://cdn.example/song.flac"],
+                "gain": false
+            }
+        }"#;
+        let info: FileInfo = serde_json::from_str(json).unwrap();
+        let file = info.playable().expect("playable flac");
+        assert!(file.is_lossless());
+        assert_eq!(file.direct_url(), Some("https://cdn.example/song.flac"));
+    }
+
+    #[test]
+    fn rejects_encrypted_and_non_flac_mp4_variants() {
+        let encrypted = FileDownloadInfo {
+            codec: "flac".into(),
+            transport: "encraw".into(),
+            url: "https://cdn.example/song.flac".into(),
+            ..Default::default()
+        };
+        assert!(!encrypted.is_playable());
+
+        let aac_mp4 = FileDownloadInfo {
+            codec: "aac-mp4".into(),
+            transport: "raw".into(),
+            url: "https://cdn.example/song.mp4".into(),
+            ..Default::default()
+        };
+        assert!(!aac_mp4.is_playable());
+
+        let flac_mp4 = FileDownloadInfo {
+            codec: "flac-mp4".into(),
+            transport: "raw".into(),
+            url: "https://cdn.example/song.mp4".into(),
+            ..Default::default()
+        };
+        assert!(flac_mp4.is_playable());
+        assert!(flac_mp4.is_lossless());
     }
 }

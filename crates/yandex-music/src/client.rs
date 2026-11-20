@@ -3,7 +3,10 @@
 use crate::auth::{
     DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DEFAULT_DEVICE_NAME, DeviceCode, OAuthToken,
 };
-use crate::download::{DownloadInfo, DownloadedTrack, build_direct_link, select_best_mp3};
+use crate::download::{
+    DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FileInfo, build_direct_link,
+    file_info_sign, select_best_mp3,
+};
 use crate::http::Transport;
 use crate::models::{Album, Artist, Playlist, SearchResult, Status, Track, TracksList};
 use crate::{Error, Result};
@@ -532,8 +535,37 @@ impl Client {
         build_direct_link(&xml)
     }
 
-    /// Download the best available MP3 of a track into memory.
+    /// Signed file information for a track. Prefers raw FLAC and falls back to
+    /// MP3 when lossless is unavailable.
+    pub fn file_info(&self, track_id: &str) -> Result<FileInfo> {
+        let token = self.require_token()?;
+        let (timestamp, sign) = file_info_sign(track_id, "lossless", FILE_INFO_CODECS, "raw")?;
+        let url = self.api_url("/get-file-info");
+        let query = [
+            ("ts", timestamp.to_string()),
+            ("trackId", track_id.to_string()),
+            ("quality", "lossless".to_string()),
+            ("codecs", FILE_INFO_CODECS.join(",")),
+            ("transports", "raw".to_string()),
+            ("sign", sign),
+        ];
+
+        let info: Option<FileInfo> =
+            self.inner
+                .http
+                .get_with_client(&url, &query, Some(&token), FILE_INFO_CLIENT)?;
+        info.ok_or(Error::NoDownload)
+    }
+
+    /// Download the best available audio of a track into memory.
+    ///
+    /// Tries the signed lossless endpoint first (FLAC when the account and
+    /// track support it), then falls back to the legacy MP3 variants.
     pub fn download_track(&self, track_id: &str) -> Result<DownloadedTrack> {
+        if let Ok(downloaded) = self.download_lossless(track_id) {
+            return Ok(downloaded);
+        }
+
         let infos = self.download_info(track_id)?;
         let info = select_best_mp3(&infos).ok_or(Error::NoDownload)?.clone();
         let token = self.require_token()?;
@@ -552,6 +584,24 @@ impl Client {
             direct_url,
             codec: info.codec,
             bitrate_kbps: info.bitrate_in_kbps,
+        })
+    }
+
+    fn download_lossless(&self, track_id: &str) -> Result<DownloadedTrack> {
+        let info = self.file_info(track_id)?;
+        let file = info.playable().ok_or(Error::NoDownload)?;
+        let direct_url = file.direct_url().ok_or(Error::NoDownload)?.to_string();
+        let token = self.require_token()?;
+        let bytes =
+            self.inner
+                .http
+                .get_bytes(&direct_url, Some(&token), Duration::from_secs(180))?;
+
+        Ok(DownloadedTrack {
+            bytes,
+            direct_url,
+            codec: file.codec.clone(),
+            bitrate_kbps: file.bitrate,
         })
     }
 

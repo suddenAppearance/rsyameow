@@ -602,3 +602,60 @@ fn search_artists_and_albums_are_parsed() {
         Some("https://avatars.yandex.net/get-music-content/2/400x400")
     );
 }
+
+#[test]
+fn file_info_is_signed_and_lossless_download_is_preferred() {
+    let server =
+        TestServer::start(
+            |request| match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/get-file-info") => {
+                    assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+                    assert_eq!(
+                        request.header("X-Yandex-Music-Client"),
+                        Some("YandexMusicDesktopAppWindows/5.95.0")
+                    );
+                    assert_eq!(request.query_value("trackId"), Some("12345"));
+                    assert_eq!(request.query_value("quality"), Some("lossless"));
+                    assert_eq!(request.query_value("codecs"), Some("flac,flac-mp4,mp3"));
+                    assert_eq!(request.query_value("transports"), Some("raw"));
+                    assert!(request.query_value("ts").unwrap().parse::<u64>().is_ok());
+                    assert_eq!(request.query_value("sign").unwrap().len(), 43);
+
+                    let host = request.header("Host").expect("Host header");
+                    MockResponse::json(
+                        200,
+                        json!({
+                            "result": {
+                                "downloadInfo": {
+                                    "quality": "lossless",
+                                    "codec": "flac-mp4",
+                                    "bitrate": 0,
+                                    "transport": "raw",
+                                    "url": format!("http://{host}/audio/song.m4a"),
+                                    "urls": [],
+                                    "gain": false
+                                }
+                            }
+                        }),
+                    )
+                }
+                ("GET", "/audio/song.m4a") => {
+                    MockResponse::bytes(b"\x00\x00\x00\x1cftypfake-mp4".to_vec())
+                }
+                other => panic!("unexpected request: {other:?}"),
+            },
+        );
+
+    let client = client_for(&server, Some("test-token"));
+
+    let info = client.file_info("12345").unwrap();
+    let file = info.playable().expect("lossless file");
+    assert_eq!(file.codec, "flac-mp4");
+    assert!(file.is_lossless());
+
+    let downloaded = client.download_track("12345").unwrap();
+    assert_eq!(downloaded.codec, "flac-mp4");
+    assert_eq!(downloaded.bitrate_kbps, 0);
+    assert!(downloaded.bytes.starts_with(b"\x00\x00\x00\x1cftyp"));
+    assert!(downloaded.direct_url.ends_with("/audio/song.m4a"));
+}

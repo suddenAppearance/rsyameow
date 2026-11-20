@@ -33,11 +33,22 @@ impl Transport {
         query: &[(&str, String)],
         token: Option<&str>,
     ) -> ureq::Request {
+        self.request_with_client(method, url, query, token, MUSIC_CLIENT_HEADER)
+    }
+
+    fn request_with_client(
+        &self,
+        method: &str,
+        url: &str,
+        query: &[(&str, String)],
+        token: Option<&str>,
+        client: &str,
+    ) -> ureq::Request {
         let mut request = match method {
             "POST" => self.agent.post(url),
             _ => self.agent.get(url),
         }
-        .set("X-Yandex-Music-Client", MUSIC_CLIENT_HEADER)
+        .set("X-Yandex-Music-Client", client)
         .set("User-Agent", USER_AGENT)
         .set("Accept-Language", "ru")
         .set("Accept", "application/json, text/xml;q=0.9, */*;q=0.8");
@@ -61,6 +72,23 @@ impl Transport {
         token: Option<&str>,
     ) -> Result<T> {
         let request = self.request("GET", url, query, token).timeout(self.timeout);
+        let response = request.call().map_err(map_ureq_error)?;
+        let body = read_body(response)?;
+        decode_api_envelope(&body)
+    }
+
+    /// GET a JSON document with a caller-provided `X-Yandex-Music-Client`
+    /// header. Required by endpoints whose signature is tied to the client id.
+    pub(crate) fn get_with_client<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+        token: Option<&str>,
+        client: &str,
+    ) -> Result<T> {
+        let request = self
+            .request_with_client("GET", url, query, token, client)
+            .timeout(self.timeout);
         let response = request.call().map_err(map_ureq_error)?;
         let body = read_body(response)?;
         decode_api_envelope(&body)

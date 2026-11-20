@@ -1776,11 +1776,17 @@ impl RootView {
                         this.cache_track(&track);
                         this.player.track = Some(track.clone());
                         this.player.position = Duration::ZERO;
-                        this.player.quality = Some(format!(
-                            "{} · {} кбит/с",
-                            downloaded.codec.to_uppercase(),
-                            downloaded.bitrate_kbps
-                        ));
+                        this.player.quality = Some(
+                            if downloaded.codec.to_ascii_lowercase().starts_with("flac") {
+                                "FLAC · Lossless".to_string()
+                            } else {
+                                format!(
+                                    "{} · {} кбит/с",
+                                    downloaded.codec.to_uppercase(),
+                                    downloaded.bitrate_kbps
+                                )
+                            },
+                        );
                         this.player.error = None;
 
                         match this.audio.load(downloaded.bytes) {

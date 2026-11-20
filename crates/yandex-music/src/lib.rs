@@ -67,7 +67,10 @@ mod models;
 
 pub use auth::{DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DeviceCode, OAuthToken};
 pub use client::{Client, ClientBuilder};
-pub use download::{DownloadInfo, DownloadedTrack, SIGN_SALT, build_direct_link};
+pub use download::{
+    DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FILE_INFO_SIGN_KEY,
+    FileDownloadInfo, FileInfo, SIGN_SALT, build_direct_link, file_info_sign, file_info_sign_at,
+};
 pub use error::{Error, Result};
 pub use models::{
     Account, Album, Artist, Cover, Permissions, Playlist, Plus, SearchResult, Status, Subscription,

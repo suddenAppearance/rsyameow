@@ -54,12 +54,12 @@ impl AudioEngine {
         Ok(self.backend.as_mut().expect("backend was just created"))
     }
 
-    /// Decode and play MP3 bytes from the beginning.
+    /// Decode and play audio bytes (MP3 or FLAC) from the beginning.
     pub fn load(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         let backend = self.ensure_backend()?;
         backend.player.stop();
         let decoder = Decoder::try_from(Cursor::new(bytes))
-            .map_err(|error| format!("не удалось декодировать MP3: {error}"))?;
+            .map_err(|error| format!("не удалось декодировать аудио: {error}"))?;
         backend.player.append(decoder);
         backend.player.play();
         Ok(())
