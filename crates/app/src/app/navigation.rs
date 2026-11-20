@@ -46,6 +46,7 @@ impl RootView {
             return;
         }
         self.screen = Screen::Settings;
+        self.quality_select_open = false;
         self.nav_stack.clear();
         self.queue_open = false;
         self.schedule_state_save(cx);

@@ -401,8 +401,45 @@ impl RootView {
         equalizer: config::EqualizerPreset,
         cx: &mut Context<Self>,
     ) {
+        self.equalizer_commit_epoch = self.equalizer_commit_epoch.wrapping_add(1);
         self.equalizer = equalizer;
-        self.audio.set_equalizer(equalizer);
+        self.equalizer_gains = equalizer.gains();
+        self.audio.set_equalizer(self.equalizer_gains);
+        self.save_playback_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_equalizer_band(&mut self, index: usize, gain: f32, cx: &mut Context<Self>) {
+        if index >= self.equalizer_gains.len() {
+            return;
+        }
+        self.equalizer_gains[index] = gain.clamp(-12.0, 12.0);
+        self.equalizer = config::EqualizerPreset::Custom;
+        self.schedule_equalizer_commit(cx);
+        cx.notify();
+    }
+
+    fn schedule_equalizer_commit(&mut self, cx: &mut Context<Self>) {
+        self.equalizer_commit_epoch = self.equalizer_commit_epoch.wrapping_add(1);
+        let epoch = self.equalizer_commit_epoch;
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            Timer::after(Duration::from_millis(250)).await;
+            this.update(cx, |this, cx| {
+                if this.equalizer_commit_epoch != epoch {
+                    return;
+                }
+                this.audio.set_equalizer(this.equalizer_gains);
+                this.save_playback_settings();
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn commit_equalizer(&mut self, cx: &mut Context<Self>) {
+        self.equalizer_commit_epoch = self.equalizer_commit_epoch.wrapping_add(1);
+        self.audio.set_equalizer(self.equalizer_gains);
         self.save_playback_settings();
         cx.notify();
     }
@@ -412,6 +449,7 @@ impl RootView {
             volume: self.volume,
             quality: self.audio_quality,
             equalizer: self.equalizer,
+            equalizer_gains: Some(self.equalizer_gains),
         };
         if let Err(error) = config::save_playback_settings(&settings) {
             eprintln!("failed to save playback settings: {error}");

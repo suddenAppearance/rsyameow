@@ -34,6 +34,7 @@ pub enum EqualizerPreset {
     Vocal,
     Rock,
     Electronic,
+    Custom,
 }
 
 impl EqualizerPreset {
@@ -44,16 +45,18 @@ impl EqualizerPreset {
             Self::Vocal => "Вокал",
             Self::Rock => "Рок",
             Self::Electronic => "Электроника",
+            Self::Custom => "Свой",
         }
     }
 
-    pub fn description(self) -> &'static str {
+    /// Five peaking-filter gains in dB (60, 230, 910, 3600 and 14000 Hz).
+    pub fn gains(self) -> [f32; 5] {
         match self {
-            Self::Flat => "Без изменений",
-            Self::Bass => "Больше низких частот",
-            Self::Vocal => "Акцент на голосе",
-            Self::Rock => "Плотная середина и верх",
-            Self::Electronic => "Глубокий бас и воздух",
+            Self::Flat | Self::Custom => [0.0; 5],
+            Self::Bass => [6.0, 4.0, 1.0, 0.0, 0.0],
+            Self::Vocal => [-3.0, 0.0, 3.0, 4.0, 1.0],
+            Self::Rock => [4.0, 2.0, -2.0, 2.0, 4.0],
+            Self::Electronic => [5.0, 2.0, 0.0, 3.0, 5.0],
         }
     }
 }
@@ -67,6 +70,8 @@ pub struct PlaybackSettings {
     pub quality: AudioQuality,
     #[serde(default)]
     pub equalizer: EqualizerPreset,
+    #[serde(default)]
+    pub equalizer_gains: Option<[f32; 5]>,
 }
 
 fn default_volume() -> f32 {
@@ -79,6 +84,7 @@ impl Default for PlaybackSettings {
             volume: default_volume(),
             quality: AudioQuality::Lossless,
             equalizer: EqualizerPreset::Flat,
+            equalizer_gains: None,
         }
     }
 }

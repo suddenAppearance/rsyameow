@@ -18,6 +18,7 @@ pub struct Slider {
     value: f32,
     width: f32,
     on_change: Option<ChangeHandler>,
+    on_commit: Option<ChangeHandler>,
 }
 
 impl Slider {
@@ -26,6 +27,7 @@ impl Slider {
             value: value.clamp(0.0, 1.0),
             width: 96.0,
             on_change: None,
+            on_commit: None,
         }
     }
 
@@ -36,6 +38,11 @@ impl Slider {
 
     pub fn on_change(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
         self.on_change = Some(Arc::new(handler));
+        self
+    }
+
+    pub fn on_commit(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
+        self.on_commit = Some(Arc::new(handler));
         self
     }
 }
@@ -51,9 +58,17 @@ impl RenderOnce for Slider {
         let handler = self.on_change;
         let handler_for_down = handler.clone();
         let handler_for_move = handler;
+        let commit = self.on_commit;
+        let commit_for_up = commit.clone();
+        let commit_for_up_out = commit;
         let dragging = Rc::new(Cell::new(false));
+        let last_value = Rc::new(Cell::new(value));
+        let last_value_for_up = last_value.clone();
+        let last_value_for_up_out = last_value.clone();
         let dragging_for_down = dragging.clone();
+        let last_value_for_down = last_value.clone();
         let dragging_for_move = dragging.clone();
+        let last_value_for_move = last_value.clone();
         let dragging_for_up = dragging.clone();
         let dragging_for_up_out = dragging;
 
@@ -84,6 +99,7 @@ impl RenderOnce for Slider {
                         / width)
                         .clamp(0.0, 1.0);
                     dragging_for_down.set(true);
+                    last_value_for_down.set(value);
                     handler(value, window, cx);
                 },
             )
@@ -106,13 +122,22 @@ impl RenderOnce for Slider {
                 }
                 let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
                     .clamp(0.0, 1.0);
+                last_value_for_move.set(value);
                 handler(value, window, cx);
             })
-            .on_mouse_up(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
-                dragging_for_up.set(false);
+            .on_mouse_up(MouseButton::Left, move |_: &MouseUpEvent, window, cx| {
+                if dragging_for_up.replace(false)
+                    && let Some(handler) = commit_for_up.as_ref()
+                {
+                    handler(last_value_for_up.get(), window, cx);
+                }
             })
-            .on_mouse_up_out(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
-                dragging_for_up_out.set(false);
+            .on_mouse_up_out(MouseButton::Left, move |_: &MouseUpEvent, window, cx| {
+                if dragging_for_up_out.replace(false)
+                    && let Some(handler) = commit_for_up_out.as_ref()
+                {
+                    handler(last_value_for_up_out.get(), window, cx);
+                }
             })
             .child(
                 gpui::div()

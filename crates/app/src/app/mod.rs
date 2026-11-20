@@ -306,6 +306,9 @@ pub struct RootView {
     pub(crate) volume: f32,
     pub(crate) audio_quality: yandex_music::AudioQuality,
     pub(crate) equalizer: config::EqualizerPreset,
+    pub(crate) equalizer_gains: [f32; 5],
+    pub(crate) quality_select_open: bool,
+    equalizer_commit_epoch: u64,
     previous_volume: f32,
     pub(crate) like_busy: bool,
     pub(crate) liked_reloading: bool,
@@ -389,9 +392,12 @@ impl RootView {
         let volume = playback_settings.volume;
         let audio_quality = playback_settings.quality;
         let equalizer = playback_settings.equalizer;
+        let equalizer_gains = playback_settings
+            .equalizer_gains
+            .unwrap_or_else(|| equalizer.gains());
         let mut audio = AudioEngine::new();
         audio.set_volume(volume);
-        audio.set_equalizer(equalizer);
+        audio.set_equalizer(equalizer_gains);
 
         let mut view = Self {
             screen: Screen::Login,
@@ -446,6 +452,9 @@ impl RootView {
             volume,
             audio_quality,
             equalizer,
+            equalizer_gains,
+            quality_select_open: false,
+            equalizer_commit_epoch: 0,
             previous_volume: if volume > 0.0 { volume } else { 0.85 },
             like_busy: false,
             liked_reloading: false,

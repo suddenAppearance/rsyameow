@@ -1,6 +1,5 @@
 //! Thin wrapper around rodio used by the playback UI.
 
-use crate::config::EqualizerPreset;
 use rodio::source::{SeekError, Source};
 use rodio::{ChannelCount, Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate};
 use std::f64::consts::PI;
@@ -19,7 +18,7 @@ type EqualizedDecoder = EqualizedSource<DecoderSource>;
 pub struct AudioEngine {
     backend: Option<Backend>,
     volume: f32,
-    equalizer: EqualizerPreset,
+    equalizer: [f32; 5],
     /// Raw bytes of the current track. Retained so a decoder can be rebuilt
     /// when the format's demuxer refuses a backward seek.
     bytes: Option<Arc<[u8]>>,
@@ -36,7 +35,7 @@ impl AudioEngine {
         Self {
             backend: None,
             volume: 0.85,
-            equalizer: EqualizerPreset::Flat,
+            equalizer: [0.0; 5],
             bytes: None,
         }
     }
@@ -59,21 +58,18 @@ impl AudioEngine {
 
     /// Change the equalizer preset. The current track is rebuilt in place so
     /// the effect applies immediately.
-    pub fn set_equalizer(&mut self, preset: EqualizerPreset) {
-        if self.equalizer == preset {
+    pub fn set_equalizer(&mut self, gains: [f32; 5]) {
+        if self.equalizer == gains {
             return;
         }
-        self.equalizer = preset;
+        self.equalizer = gains;
         if self.backend.is_some() && self.bytes.is_some() {
             let position = self.position();
             let _ = self.reload_at(position);
         }
     }
 
-    fn make_decoder(
-        bytes: Arc<[u8]>,
-        equalizer: EqualizerPreset,
-    ) -> Result<EqualizedDecoder, String> {
+    fn make_decoder(bytes: Arc<[u8]>, equalizer: [f32; 5]) -> Result<EqualizedDecoder, String> {
         let decoder = Decoder::try_from(Cursor::new(bytes))
             .map_err(|error| format!("не удалось декодировать аудио: {error}"))?;
         Ok(EqualizedSource::new(decoder, equalizer))
@@ -248,21 +244,14 @@ struct EqualizedSource<S> {
 }
 
 impl<S: Source<Item = f32>> EqualizedSource<S> {
-    fn new(inner: S, preset: EqualizerPreset) -> Self {
+    fn new(inner: S, gains: [f32; 5]) -> Self {
         let sample_rate = f64::from(inner.sample_rate().get());
         let channels = inner.channels().get() as usize;
-        let gains = match preset {
-            EqualizerPreset::Flat => [0.0, 0.0, 0.0, 0.0, 0.0],
-            EqualizerPreset::Bass => [6.0, 4.0, 1.0, 0.0, 0.0],
-            EqualizerPreset::Vocal => [-3.0, 0.0, 3.0, 4.0, 1.0],
-            EqualizerPreset::Rock => [4.0, 2.0, -2.0, 2.0, 4.0],
-            EqualizerPreset::Electronic => [5.0, 2.0, 0.0, 3.0, 5.0],
-        };
         let bands = [60.0, 230.0, 910.0, 3600.0, 14000.0];
         let channel_filters = (0..channels.max(1))
             .map(|_| {
                 std::array::from_fn(|index| {
-                    Biquad::peaking(sample_rate, bands[index], 1.0, gains[index])
+                    Biquad::peaking(sample_rate, bands[index], 1.0, f64::from(gains[index]))
                 })
             })
             .collect::<Vec<_>>();

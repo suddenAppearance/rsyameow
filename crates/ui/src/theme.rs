@@ -192,4 +192,5 @@ pub mod icons {
     pub const PAW: &str = "icons/paw.svg";
     pub const ALBUM: &str = "icons/album.svg";
     pub const SETTINGS: &str = "icons/settings.svg";
+    pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
 }

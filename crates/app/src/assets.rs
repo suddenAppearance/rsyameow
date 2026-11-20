@@ -44,6 +44,7 @@ impl AssetSource for Assets {
             "icons/paw.svg" => asset!("icons/paw.svg"),
             "icons/album.svg" => asset!("icons/album.svg"),
             "icons/settings.svg" => asset!("icons/settings.svg"),
+            "icons/chevron-down.svg" => asset!("icons/chevron-down.svg"),
             "fonts/PT_Sans-Web-Regular.ttf" => asset!("fonts/PT_Sans-Web-Regular.ttf"),
             "fonts/PT_Sans-Web-Bold.ttf" => asset!("fonts/PT_Sans-Web-Bold.ttf"),
             _ => return Ok(None),
