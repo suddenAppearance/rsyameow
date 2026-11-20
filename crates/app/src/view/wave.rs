@@ -135,9 +135,7 @@ impl RootView {
                                     })
                                     .on_commit(move |fraction, _, cx| {
                                         commit_view.update(cx, |this, cx| {
-                                            if this.seek_preview.is_some() {
-                                                this.seek_to(fraction, cx);
-                                            }
+                                            this.seek_to(fraction, cx);
                                         });
                                     })
                             })
