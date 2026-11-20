@@ -1,11 +1,12 @@
 //! Demo data used by `--demo` to preview the UI without a Yandex account.
 
 use gpui::{Image, Rgba};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 use yandex_music::{
-    Account, Artist, Permissions, Playlist, Plus, Status, Subscription, Track, TrackShort, User,
+    Account, Album, Artist, Permissions, Playlist, Plus, Status, Subscription, Track, TrackShort,
+    User,
 };
 
 /// Fictional listeners and tracks. They are intentionally not tied to real
@@ -68,6 +69,28 @@ fn track(id: &str, title: &str, artist: &str, album: &str, duration_ms: u64, yea
         available_for_premium_users: Some(false),
         ..Default::default()
     }
+}
+
+/// Albums represented by the demo tracks, one per unique album id.
+pub fn albums() -> Vec<Album> {
+    let mut seen = HashSet::new();
+    let mut albums = Vec::new();
+    for track in tracks() {
+        for base in &track.albums {
+            let Some(id) = base.id else {
+                continue;
+            };
+            if !seen.insert(id) {
+                continue;
+            }
+            let mut album = base.clone();
+            album.artists = track.artists.clone();
+            album.volumes = vec![vec![track.clone()]];
+            album.track_count = Some(1);
+            albums.push(album);
+        }
+    }
+    albums
 }
 
 /// A small, believable liked-tracks library.

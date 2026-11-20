@@ -50,6 +50,7 @@ impl RootView {
 
         let profile_active = matches!(self.screen, Screen::Profile);
         let liked_active = matches!(self.screen, Screen::Liked);
+        let albums_active = matches!(self.screen, Screen::Albums);
         let wave_active = matches!(self.screen, Screen::Wave);
         let now_active = matches!(self.screen, Screen::NowPlaying);
         let search_active = matches!(self.screen, Screen::Search);
@@ -86,6 +87,36 @@ impl RootView {
             }))
             .when(!collapsed, |element| element.child("Любимые"))
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_liked(cx)));
+
+        let nav_albums = div()
+            .id("nav-albums")
+            .flex()
+            .items_center()
+            .gap(px(space::MD))
+            .h(px(42.0))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
+            .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
+            .cursor_pointer()
+            .text_size(px(text::BASE))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .when(albums_active, |element| {
+                element.bg(theme.colors.accent_soft).text_color(accent)
+            })
+            .when(!albums_active, |element| {
+                element
+                    .text_color(secondary)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(Icon::new(icons::ALBUM).size(17.0).color(if albums_active {
+                accent
+            } else {
+                secondary
+            }))
+            .when(!collapsed, |element| element.child("Альбомы"))
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.open_albums(cx);
+            }));
 
         let nav_now = div()
             .id("nav-now-playing")
@@ -345,6 +376,7 @@ impl RootView {
                         element.child(section_label(theme, "МЕНЮ"))
                     })
                     .child(nav_liked)
+                    .child(nav_albums)
                     .child(nav_wave)
                     .child(nav_now)
                     .child(nav_search)
@@ -523,6 +555,7 @@ pub(crate) fn screen_title(screen: &Screen) -> &'static str {
         Screen::Loading => "Загрузка",
         Screen::Profile => "Профиль",
         Screen::Liked => "Любимые",
+        Screen::Albums => "Альбомы",
         Screen::Search => "Поиск",
         Screen::Playlists | Screen::Playlist => "Плейлисты",
         Screen::Artist => "Артист",

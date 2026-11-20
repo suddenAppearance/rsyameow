@@ -1,5 +1,6 @@
 //! Application state, root view construction, routing types and background tasks.
 mod album;
+mod albums;
 mod artist;
 mod auth;
 mod cover_art;
@@ -59,6 +60,7 @@ pub(crate) enum Screen {
     Loading,
     Profile,
     Liked,
+    Albums,
     Search,
     Playlists,
     Playlist,
@@ -160,6 +162,16 @@ pub(crate) struct PlaylistsState {
     pub(crate) detail_epoch: u64,
 }
 
+/// State of the user's album collection.
+#[derive(Default)]
+pub(crate) struct AlbumsState {
+    pub(crate) items: Vec<Album>,
+    pub(crate) loading: bool,
+    pub(crate) loaded: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) epoch: u64,
+}
+
 /// State of the search page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SearchKind {
@@ -242,6 +254,7 @@ pub struct RootView {
     pub(crate) token_input: Entity<TextInput>,
     pub(crate) search_input: Entity<TextInput>,
     pub(crate) search: SearchState,
+    pub(crate) albums: AlbumsState,
     pub(crate) search_epoch: u64,
     search_debounce_epoch: u64,
     pub(crate) playlists: PlaylistsState,
@@ -349,6 +362,7 @@ impl RootView {
             token_input,
             search_input,
             search: SearchState::default(),
+            albums: AlbumsState::default(),
             search_epoch: 0,
             search_debounce_epoch: 0,
             playlists: PlaylistsState::default(),

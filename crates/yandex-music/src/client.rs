@@ -9,8 +9,8 @@ use crate::download::{
 };
 use crate::http::Transport;
 use crate::models::{
-    Album, Artist, ArtistAlbums, ArtistTracks, Playlist, SearchResult, Status, Track, TrackLyrics,
-    TracksList, WaveBatch,
+    Album, Artist, ArtistAlbums, ArtistTracks, LikedAlbum, Playlist, SearchResult, Status, Track,
+    TrackLyrics, TracksList, WaveBatch,
 };
 use crate::{Error, Result};
 use serde::Deserialize;
@@ -514,6 +514,34 @@ impl Client {
 
         let response: LikesResponse = self.inner.http.get(&url, &query, Some(&token))?;
         Ok(response.library.unwrap_or_default())
+    }
+
+    /// Liked albums of the current account.
+    pub fn liked_albums(&self) -> Result<Vec<Album>> {
+        let token = self.require_token()?;
+        let uid = match self.cached_uid() {
+            Some(uid) => uid,
+            None => self
+                .init()?
+                .account
+                .and_then(|account| account.uid)
+                .ok_or(Error::Decode("account status contains no uid".into()))?,
+        };
+        let url = self.api_url(&format!("/users/{uid}/likes/albums"));
+        let liked: Vec<LikedAlbum> = self.inner.http.get(&url, &[], Some(&token))?;
+        if liked.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids = liked
+            .iter()
+            .map(|album| album.id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let url = self.api_url("/albums");
+        let query = [("album-ids", ids)];
+        let albums: Option<Vec<Album>> = self.inner.http.get(&url, &query, Some(&token))?;
+        Ok(albums.unwrap_or_default())
     }
 
     // ------------------------------------------------------------------- Wave

@@ -403,6 +403,14 @@ pub struct ArtistTracks {
     pub pager: Option<Pager>,
 }
 
+/// A liked album entry from the user's collection.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LikedAlbum {
+    #[serde(default)]
+    pub id: u64,
+}
+
 /// A page of artist albums.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

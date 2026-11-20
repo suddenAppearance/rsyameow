@@ -1,5 +1,6 @@
 //! Screen rendering, routing and the root gpui element.
 mod album;
+mod albums;
 mod artist;
 mod auth;
 mod liked;
@@ -31,7 +32,7 @@ use rsyameow_ui::{
     SeekBar, Spinner, Stat, Theme, TrackRow, icons, space, text,
 };
 use std::sync::Arc;
-use yandex_music::{Playlist, Status, Track};
+use yandex_music::{Album, Playlist, Status, Track};
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -54,6 +55,7 @@ impl Render for RootView {
             Screen::LoadError(message) => self.load_error_view(message, &theme, cx),
             Screen::Profile => self.profile_view(&theme, cx),
             Screen::Liked => self.liked_view(&theme, cx),
+            Screen::Albums => self.albums_view(&theme, cx),
             Screen::Search => self.search_view(&theme, cx),
             Screen::Playlists => self.playlists_view(&theme, cx),
             Screen::Playlist => self.playlist_detail_view(&theme, cx),

@@ -7,6 +7,7 @@ impl RootView {
         match self.screen {
             Screen::Profile | Screen::Login | Screen::Loading | Screen::LoadError(_) => "profile",
             Screen::Liked => "liked",
+            Screen::Albums => "albums",
             Screen::Search => "search",
             Screen::Playlists => "playlists",
             Screen::Playlist => "playlist",
@@ -142,6 +143,7 @@ impl RootView {
 
         self.screen = match state.screen.as_str() {
             "liked" => Screen::Liked,
+            "albums" => Screen::Albums,
             "search" => Screen::Search,
             "playlists" => Screen::Playlists,
             "playlist" => Screen::Playlist,
@@ -310,6 +312,8 @@ impl RootView {
             self.run_search(state.search_query.clone(), 0, cx);
         } else if self.screen == Screen::Playlists {
             self.load_playlists(cx);
+        } else if self.screen == Screen::Albums {
+            self.load_albums(cx);
         }
 
         if self.queue_open {

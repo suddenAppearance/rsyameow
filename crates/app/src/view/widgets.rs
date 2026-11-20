@@ -68,6 +68,37 @@ pub(crate) fn playlist_cover(theme: &Theme, image: Option<Arc<Image>>, height: f
         .child(content)
 }
 
+pub(crate) fn album_cover(theme: &Theme, image: Option<Arc<Image>>, height: f32) -> Div {
+    let content = match image {
+        Some(image) => img(ImageSource::Image(image))
+            .size_full()
+            .rounded(px(12.0))
+            .object_fit(ObjectFit::Cover)
+            .into_any_element(),
+        None => div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(theme.colors.accent_soft)
+            .child(
+                Icon::new(icons::ALBUM)
+                    .size(36.0)
+                    .color(theme.colors.accent),
+            )
+            .into_any_element(),
+    };
+
+    div()
+        .w_full()
+        .h(px(height))
+        .rounded(px(12.0))
+        .overflow_hidden()
+        .bg(theme.colors.surface_active)
+        .flex_shrink_0()
+        .child(content)
+}
+
 pub(crate) fn search_thumb(
     theme: &Theme,
     image: Option<Arc<Image>>,

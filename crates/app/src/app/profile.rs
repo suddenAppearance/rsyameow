@@ -21,6 +21,7 @@ impl RootView {
         self.liked_error = None;
         self.liked_reload_epoch = self.liked_reload_epoch.wrapping_add(1);
         self.artist = ArtistState::default();
+        self.albums = AlbumsState::default();
         self.album = AlbumState::default();
         self.wave = WaveState::default();
         self.page_track = None;

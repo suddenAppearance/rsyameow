@@ -29,6 +29,7 @@ impl RootView {
         self.search_epoch += 1;
         self.search_input.update(cx, |input, cx| input.clear(cx));
         self.artist = ArtistState::default();
+        self.albums = AlbumsState::default();
         self.album = AlbumState::default();
         self.wave = WaveState::default();
         self.page_track = None;
