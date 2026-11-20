@@ -33,11 +33,19 @@ impl AudioEngine {
         }
     }
 
+    /// Map the linear UI slider to a quadratic gain curve. This makes quiet
+    /// steps near the top of the slider less extreme and attenuation in the
+    /// lower half much more noticeable.
+    fn volume_gain(volume: f32) -> f32 {
+        let volume = volume.clamp(0.0, 1.0);
+        volume * volume
+    }
+
     /// Set the output volume; the value is remembered until a device opens.
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
         if let Some(backend) = self.backend.as_ref() {
-            backend.player.set_volume(self.volume);
+            backend.player.set_volume(Self::volume_gain(self.volume));
         }
     }
 
@@ -50,7 +58,7 @@ impl AudioEngine {
                 )
             })?;
             let player = Player::connect_new(sink.mixer());
-            player.set_volume(self.volume);
+            player.set_volume(Self::volume_gain(self.volume));
             self.backend = Some(Backend {
                 _sink: sink,
                 player,
@@ -164,6 +172,15 @@ impl Default for AudioEngine {
 mod tests {
     use super::*;
     use rodio::Source as _;
+
+    #[test]
+    fn volume_uses_a_quadratic_curve() {
+        assert!((AudioEngine::volume_gain(0.0) - 0.0).abs() < f32::EPSILON);
+        assert!((AudioEngine::volume_gain(0.5) - 0.25).abs() < f32::EPSILON);
+        assert!((AudioEngine::volume_gain(0.85) - 0.7225).abs() < 0.0001);
+        assert!((AudioEngine::volume_gain(1.0) - 1.0).abs() < f32::EPSILON);
+        assert!((AudioEngine::volume_gain(2.0) - 1.0).abs() < f32::EPSILON);
+    }
 
     #[test]
     #[ignore = "requires a working audio device"]
