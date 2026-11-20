@@ -1,21 +1,21 @@
 //! Rendering for [`RootView`].
 
 use crate::app::{
-    CloseQueue, CloseWindow, FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind,
-    ToggleMute, TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
+    CloseQueue, CloseWindow, FocusSearch, NextTrack, PreviousTrack, QueueSource, RootView, Screen,
+    SearchKind, ToggleMute, TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
 };
 use crate::format;
 use gpui::{
-    AnyElement, Context, CursorStyle, Div, ElementId, Focusable as _, Image, ImageSource,
+    AnyElement, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla, Image, ImageSource,
     IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba, SharedString, Stateful, Window,
-    div, img, prelude::*, px, relative, rgba,
+    div, img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgba,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
-    Spinner, Stat, Theme, TrackRow, icons, space, text,
+    ProgressBar, Spinner, Stat, Theme, TrackRow, icons, space, text,
 };
 use std::sync::Arc;
-use yandex_music::{Playlist, Status};
+use yandex_music::{Playlist, Status, Track};
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -42,6 +42,8 @@ impl Render for RootView {
             Screen::Playlists => self.playlists_view(&theme, cx),
             Screen::Playlist => self.playlist_detail_view(&theme, cx),
             Screen::Artist => self.artist_view(&theme, cx),
+            Screen::ArtistTracks => self.artist_tracks_view(&theme, cx),
+            Screen::ArtistAlbums => self.artist_albums_view(&theme, cx),
             Screen::Album => self.album_view(&theme, cx),
             Screen::Track => self.track_view(&theme, cx),
             Screen::Wave => self.wave_view(&theme, cx),
@@ -556,6 +558,7 @@ impl RootView {
         let current_index = self.queue_index;
         let current_id = self.player.track.as_ref().map(|track| track.id.clone());
         let playing = self.player.playing;
+        let phase = self.animation_phase as usize;
         let width = if self.viewport_width < 1100.0 {
             300.0
         } else {
@@ -582,21 +585,25 @@ impl RootView {
                     .child(
                         div()
                             .w(px(3.0))
-                            .h(px(7.0))
+                            .h(px(5.0 + ((phase + index) % 4) as f32 * 2.0))
                             .rounded_full()
                             .bg(theme.colors.accent),
                     )
                     .child(
                         div()
                             .w(px(3.0))
-                            .h(px(13.0))
+                            .h(px(12.0 - ((phase + index + 1) % 3) as f32 * 2.0))
                             .rounded_full()
                             .bg(theme.colors.accent),
                     )
                     .child(
                         div()
                             .w(px(3.0))
-                            .h(if playing { px(10.0) } else { px(5.0) })
+                            .h(if playing {
+                                px(8.0 + ((phase + index + 2) % 3) as f32 * 2.0)
+                            } else {
+                                px(5.0)
+                            })
                             .rounded_full()
                             .bg(theme.colors.accent),
                     )
@@ -641,41 +648,69 @@ impl RootView {
                     this.play_queue_at(index, cx);
                 }))
                 .child(leading)
-                .child(
+                .child({
+                    let mut title_element = div()
+                        .id(ElementId::Name(SharedString::from(format!(
+                            "queue-title-{index}"
+                        ))))
+                        .text_size(px(text::SM))
+                        .font_weight(if current {
+                            gpui::FontWeight::SEMIBOLD
+                        } else {
+                            gpui::FontWeight::NORMAL
+                        })
+                        .text_color(if current {
+                            theme.colors.accent
+                        } else {
+                            theme.colors.text
+                        })
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(title);
+                    if let Some(track) = track.clone() {
+                        title_element = title_element
+                            .cursor_pointer()
+                            .hover(|style| style.text_color(theme.colors.accent))
+                            .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.open_track_from_queue(track.clone(), cx);
+                            }));
+                    }
+
+                    let mut artist_element = div()
+                        .id(ElementId::Name(SharedString::from(format!(
+                            "queue-artist-{index}"
+                        ))))
+                        .text_size(px(text::XS))
+                        .text_color(theme.colors.text_muted)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(artist);
+                    if let Some(artist) = track
+                        .as_ref()
+                        .and_then(|track| track.artists.first().cloned())
+                        && let Some(artist_id) = artist.id
+                    {
+                        artist_element = artist_element
+                            .cursor_pointer()
+                            .hover(|style| style.text_color(theme.colors.accent))
+                            .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.open_artist(artist_id, Some(artist.clone()), cx);
+                            }));
+                    }
+
                     div()
                         .flex()
                         .flex_col()
                         .flex_1()
                         .min_w(px(0.0))
                         .gap(px(1.0))
-                        .child(
-                            div()
-                                .text_size(px(text::SM))
-                                .font_weight(if current {
-                                    gpui::FontWeight::SEMIBOLD
-                                } else {
-                                    gpui::FontWeight::NORMAL
-                                })
-                                .text_color(if current {
-                                    theme.colors.accent
-                                } else {
-                                    theme.colors.text
-                                })
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(text::XS))
-                                .text_color(theme.colors.text_muted)
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(artist),
-                        ),
-                )
+                        .child(title_element)
+                        .child(artist_element)
+                })
                 .child(
                     div()
                         .text_size(px(text::XS))
@@ -1665,6 +1700,7 @@ impl RootView {
                 )
                 .cover(cover)
                 .current(is_current, playing)
+                .animation_phase(self.animation_phase)
                 .on_play(cx.listener({
                     let track = track.clone();
                     move |this, _: &gpui::ClickEvent, _, cx| {
@@ -1672,6 +1708,7 @@ impl RootView {
                     }
                 }));
 
+                let row = track_navigation(row, track, cx);
                 section = section.child(row);
             }
 
@@ -1910,6 +1947,7 @@ impl RootView {
                             )
                             .cover(cover)
                             .current(is_current, playing)
+                            .animation_phase(self.animation_phase)
                             .on_play(cx.listener({
                                 let track = track.clone();
                                 move |this, _: &gpui::ClickEvent, _, cx| {
@@ -1917,6 +1955,7 @@ impl RootView {
                                 }
                             }));
 
+                            let row = track_navigation(row, track, cx);
                             list = list.child(row);
                         }
                     }
@@ -2317,7 +2356,7 @@ impl RootView {
                 );
             } else {
                 let context = tracks.clone();
-                for (index, track) in tracks.iter().enumerate() {
+                for (index, track) in tracks.iter().take(10).enumerate() {
                     let is_current = current_id.as_deref() == Some(track.id.as_str());
                     let cover = self.covers.get(&track.id).cloned();
                     let row = TrackRow::new(
@@ -2332,6 +2371,7 @@ impl RootView {
                     )
                     .cover(cover)
                     .current(is_current, playing)
+                    .animation_phase(self.animation_phase)
                     .on_play(cx.listener({
                         let track = track.clone();
                         let context = context.clone();
@@ -2340,31 +2380,38 @@ impl RootView {
                         }
                     }));
 
+                    let row = track_navigation(row, track, cx);
                     tracks_card = tracks_card.child(row);
                 }
-                if track_count as usize > tracks.len() {
+                let preview_count = tracks.len().min(10);
+                if track_count as usize > preview_count {
                     tracks_card = tracks_card.child(
                         div()
                             .pt(px(space::SM))
                             .text_size(px(text::XS))
                             .text_color(theme.colors.text_muted)
                             .text_center()
-                            .child(format!(
-                                "Показано {} из {} треков",
-                                tracks.len(),
-                                track_count
-                            )),
+                            .child(format!("Показано {preview_count} из {track_count} треков")),
                     );
                 }
             }
 
+            tracks_card = tracks_card.child(
+                div().pt(px(space::SM)).flex().justify_center().child(
+                    Button::new("artist-all-tracks", "Все треки")
+                        .variant(ButtonVariant::Ghost)
+                        .trailing_icon(icons::CHEVRON_RIGHT)
+                        .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                            this.open_artist_tracks(cx);
+                        })),
+                ),
+            );
+
             body = body.child(tracks_card);
 
             if !albums.is_empty() {
-                let columns = if self.viewport_width < 1100.0 { 2 } else { 3 };
-                let mut grid = div().w_full().grid().grid_cols(columns).gap(px(space::LG));
-
-                for album in &albums {
+                let mut strip = div().flex().gap(px(space::LG));
+                for album in albums.iter().take(10) {
                     let id = album.id.unwrap_or(0);
                     let cover = self.search_images.get(&format!("album-{id}")).cloned();
                     let title = album.display_title().to_string();
@@ -2379,11 +2426,13 @@ impl RootView {
                     };
                     let album_for_click = album.clone();
 
-                    grid = grid.child(
+                    strip = strip.child(
                         div()
                             .id(ElementId::Name(SharedString::from(format!(
                                 "artist-album-{id}"
                             ))))
+                            .w(px(180.0))
+                            .flex_shrink_0()
                             .flex()
                             .flex_col()
                             .gap(px(space::SM))
@@ -2401,7 +2450,7 @@ impl RootView {
                             .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
                                 this.open_album(id, Some(album_for_click.clone()), cx);
                             }))
-                            .child(playlist_cover(theme, cover, 140.0))
+                            .child(playlist_cover(theme, cover, 130.0))
                             .child(
                                 div()
                                     .px(px(space::XS))
@@ -2436,7 +2485,7 @@ impl RootView {
                             .child(section_title(theme, "Альбомы"))
                             .child(
                                 Badge::new(format::plural(
-                                    albums.len() as u64,
+                                    album_count,
                                     "альбом",
                                     "альбома",
                                     "альбомов",
@@ -2444,7 +2493,23 @@ impl RootView {
                                 .tone(BadgeTone::Neutral),
                             ),
                     )
-                    .child(grid);
+                    .child(
+                        div()
+                            .id("artist-albums-strip")
+                            .w_full()
+                            .overflow_x_scroll()
+                            .child(strip),
+                    )
+                    .child(
+                        div().flex().justify_center().child(
+                            Button::new("artist-all-albums", "Все альбомы")
+                                .variant(ButtonVariant::Ghost)
+                                .trailing_icon(icons::CHEVRON_RIGHT)
+                                .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                    this.open_artist_albums(cx);
+                                })),
+                        ),
+                    );
             }
         }
 
@@ -2683,6 +2748,7 @@ impl RootView {
                     )
                     .cover(cover)
                     .current(is_current, playing)
+                    .animation_phase(self.animation_phase)
                     .on_play(cx.listener({
                         let track = track.clone();
                         let context = context.clone();
@@ -2691,6 +2757,7 @@ impl RootView {
                         }
                     }));
 
+                    let row = track_navigation(row, track, cx);
                     list = list.child(row);
                 }
             }
@@ -2729,7 +2796,11 @@ impl RootView {
     }
 
     fn track_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let Some(track) = self.player.track.clone() else {
+        let Some(track) = self
+            .page_track
+            .clone()
+            .or_else(|| self.player.track.clone())
+        else {
             return div()
                 .flex()
                 .flex_col()
@@ -2758,16 +2829,31 @@ impl RootView {
                 .into_any_element();
         };
 
-        let playing = self.player.playing;
-        let loading = self.player.loading;
-        let liked = self.is_current_liked();
-        let quality = self.player.quality.clone();
+        let palette = self.track_palette(&track.id);
+        let backdrop = self.track_backdrop(&track.id);
+        let is_current = self
+            .player
+            .track
+            .as_ref()
+            .is_some_and(|current| current.id == track.id);
+        let playing = is_current && self.player.playing;
+        let loading = is_current && self.player.loading;
+        let liked = self.is_liked(&track);
+        let quality = if is_current {
+            self.player.quality.clone()
+        } else {
+            None
+        };
         let position = format::duration_or_dash(self.player.position);
         let duration = format::duration_or_dash(track.duration());
         let year = track.albums.first().and_then(|album| album.year);
         let album = track.albums.first().cloned();
         let artists = track.artists.clone();
-        let cover = self.player.cover.clone();
+        let cover = if is_current {
+            self.player.cover.clone()
+        } else {
+            self.covers.get(&track.id).cloned()
+        };
 
         let mut artist_row = div().flex().items_center().gap(px(space::XS)).flex_wrap();
         for (index, artist) in artists.iter().enumerate() {
@@ -2834,7 +2920,7 @@ impl RootView {
                         .loading(loading)
                         .on_click(cx.listener(
                             |this, _: &gpui::ClickEvent, _, cx| {
-                                this.toggle_playback(cx);
+                                this.play_page_track(cx);
                             },
                         )),
                     )
@@ -2854,11 +2940,12 @@ impl RootView {
                         } else {
                             ButtonVariant::Secondary
                         })
-                        .on_click(cx.listener(
-                            |this, _: &gpui::ClickEvent, _, cx| {
-                                this.toggle_like(cx);
-                            },
-                        )),
+                        .on_click(cx.listener({
+                            let track = track.clone();
+                            move |this, _: &gpui::ClickEvent, _, cx| {
+                                this.toggle_like_track(track.clone(), cx);
+                            }
+                        })),
                     )
                     .child(
                         IconButton::new("track-queue", icons::QUEUE)
@@ -2875,7 +2962,7 @@ impl RootView {
                     ),
             );
 
-        let hero = card(theme)
+        let hero = glass_card(theme)
             .flex_row()
             .items_center()
             .gap(px(space::XL))
@@ -2918,48 +3005,71 @@ impl RootView {
                     ),
             );
 
-        let mut info = card(theme).child(section_title(theme, "О треке"));
+        let mut info = glass_card(theme).child(section_title(theme, "О треке"));
         if !artists.is_empty() {
-            info = info.child(info_row(theme, "Исполнители", track.artist_names()));
+            info = info.child(glass_info_row(theme, "Исполнители", track.artist_names()));
         }
         if let Some(album) = &album {
-            info = info.child(info_row(theme, "Альбом", album.display_title().to_string()));
+            info = info.child(glass_info_row(
+                theme,
+                "Альбом",
+                album.display_title().to_string(),
+            ));
         }
         if let Some(year) = year {
-            info = info.child(info_row(theme, "Год", year.to_string()));
+            info = info.child(glass_info_row(theme, "Год", year.to_string()));
         }
-        info = info.child(info_row(theme, "Длительность", duration));
+        info = info.child(glass_info_row(theme, "Длительность", duration));
+        if is_current {
+            info = info.child(glass_info_row(theme, "Позиция", position.clone()));
+        }
         if let Some(quality) = quality {
-            info = info.child(info_row(theme, "Качество", quality));
+            info = info.child(glass_info_row(theme, "Качество", quality));
         }
 
         let mut body = div().w_full().flex().flex_col().gap(px(space::LG));
-        if let Some(error) = &self.player.error {
+        if is_current && let Some(error) = &self.player.error {
             body = body.child(error_banner(theme, error));
         }
         body = body.child(info);
 
         div()
+            .relative()
             .flex()
             .flex_col()
             .flex_1()
             .min_w(px(0.0))
             .h_full()
-            .id("track-scroll")
-            .overflow_y_scroll()
+            .overflow_hidden()
+            .bg(palette.0)
+            .child(immersive_background(
+                palette,
+                backdrop,
+                self.animation_phase,
+            ))
             .child(
-                div().w_full().flex().justify_center().child(
-                    div()
-                        .w_full()
-                        .max_w(px(1000.0))
-                        .p(px(space::XL))
-                        .flex()
-                        .flex_col()
-                        .gap(px(space::LG))
-                        .child(header)
-                        .child(hero)
-                        .child(body),
-                ),
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .id("track-scroll")
+                    .overflow_y_scroll()
+                    .child(
+                        div().w_full().flex().justify_center().child(
+                            div()
+                                .w_full()
+                                .max_w(px(1000.0))
+                                .p(px(space::XL))
+                                .flex()
+                                .flex_col()
+                                .gap(px(space::LG))
+                                .child(header)
+                                .child(hero)
+                                .child(body),
+                        ),
+                    ),
             )
             .into_any_element()
     }
@@ -2970,257 +3080,385 @@ impl RootView {
     }
 
     fn wave_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let tracks = self.wave.tracks.clone();
+        let active = self.queue_source == QueueSource::Wave;
+        let track = if active {
+            self.player.track.clone()
+        } else {
+            None
+        };
+        let palette = track
+            .as_ref()
+            .map(|track| self.track_palette(&track.id))
+            .unwrap_or_else(|| self.track_palette(""));
+        let backdrop = track
+            .as_ref()
+            .and_then(|track| self.track_backdrop(&track.id));
         let loading = self.wave.loading;
-        let fetching = self.wave.fetching;
-        let loaded = self.wave.loaded;
         let error = self.wave.error.clone();
-        let current_id = self.player.track.as_ref().map(|track| track.id.clone());
-        let playing = self.player.playing;
+        let phase = self.animation_phase;
 
-        let header = div()
-            .flex()
-            .items_end()
-            .justify_between()
-            .gap(px(space::LG))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(px(text::DISPLAY))
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .child("Моя волна"),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(text::SM))
-                            .text_color(theme.colors.text_secondary)
-                            .child("Персональный поток Яндекс Музыки"),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(space::SM))
-                    .child(
-                        Button::new(
-                            "wave-play",
-                            if tracks.is_empty() {
-                                "Включить волну"
-                            } else {
-                                "Слушать"
-                            },
-                        )
-                        .variant(ButtonVariant::Primary)
-                        .icon(icons::PLAY)
-                        .loading(loading)
-                        .on_click(cx.listener(
-                            |this, _: &gpui::ClickEvent, _, cx| {
-                                this.play_wave(cx);
-                            },
-                        )),
-                    )
-                    .child(
-                        Button::new("wave-shuffle", "Перемешать")
-                            .variant(ButtonVariant::Secondary)
-                            .icon(icons::SHUFFLE)
-                            .disabled(tracks.is_empty() || loading)
-                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.shuffle_wave(cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("wave-more", icons::REFRESH)
-                            .size(38.0)
-                            .icon_size(16.0)
-                            .variant(ButtonVariant::Secondary)
-                            .disabled(loading || fetching || !loaded)
-                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.wave_more(cx);
-                            })),
-                    ),
-            );
-
-        let hero = card(theme)
-            .flex_row()
-            .items_center()
-            .gap(px(space::XL))
-            .p(px(space::XL))
-            .child(
-                div()
-                    .size(px(112.0))
-                    .rounded(px(28.0))
-                    .bg(theme.colors.accent_soft)
+        let content = if let Some(track) = track {
+            let cover = self.player.cover.clone();
+            let cover_size = if self.viewport_height < 760.0 {
+                220.0
+            } else {
+                300.0
+            };
+            let cover_element = match cover {
+                Some(image) => img(ImageSource::Image(image))
+                    .size(px(cover_size))
+                    .rounded(px(24.0))
+                    .object_fit(ObjectFit::Cover)
+                    .shadow_lg()
+                    .into_any_element(),
+                None => div()
+                    .size(px(cover_size))
+                    .rounded(px(24.0))
+                    .bg(theme.colors.surface_active)
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(
-                        Icon::new(icons::SPARKLES)
-                            .size(48.0)
-                            .color(theme.colors.accent),
-                    ),
-            )
-            .child(
+                        Icon::new(icons::MUSIC)
+                            .size(56.0)
+                            .color(theme.colors.text_muted),
+                    )
+                    .into_any_element(),
+            };
+            let playing = self.player.playing;
+            let progress = self.player.progress();
+            let elapsed = format::duration(self.player.position);
+            let duration = format::duration(track.duration());
+            let liked = self.is_liked(&track);
+
+            let mut poster =
                 div()
                     .flex()
                     .flex_col()
-                    .items_start()
-                    .gap(px(space::SM))
-                    .flex_1()
-                    .min_w(px(0.0))
+                    .items_center()
+                    .gap(px(space::MD))
+                    .child(Badge::new("МОЯ ВОЛНА").tone(BadgeTone::Accent))
+                    .child(cover_element)
                     .child(
                         div()
-                            .text_size(px(30.0))
+                            .pt(px(space::SM))
+                            .text_size(px(if self.viewport_height < 760.0 {
+                                28.0
+                            } else {
+                                38.0
+                            }))
                             .font_weight(gpui::FontWeight::BOLD)
-                            .child("Поток под ваш вкус"),
+                            .text_center()
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .max_w(px(720.0))
+                            .child(track.display_title().to_string()),
                     )
                     .child(
                         div()
-                            .max_w(px(620.0))
-                            .text_size(px(text::SM))
+                            .text_size(px(text::LG))
                             .text_color(theme.colors.text_secondary)
+                            .text_center()
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .max_w(px(620.0))
+                            .child(track.artist_names()),
+                    )
+                    .child(
+                        div()
+                            .w(px(420.0))
+                            .max_w(relative(0.82))
+                            .pt(px(space::MD))
+                            .flex()
+                            .flex_col()
+                            .gap(px(space::XS))
+                            .child(ProgressBar::new(progress).height(4.0))
                             .child(
-                                "Волна собирает треки из вашей коллекции, лайков и истории прослушиваний. Когда очередь заканчивается, приложение запрашивает следующую партию.",
+                                div()
+                                    .flex()
+                                    .justify_between()
+                                    .text_size(px(text::XS))
+                                    .text_color(theme.colors.text_muted)
+                                    .child(elapsed)
+                                    .child(duration),
                             ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(space::LG))
-                            .pt(px(space::XS))
-                            .child(Stat::new(
-                                format::plural(
-                                    tracks.len() as u64,
-                                    "трек в волне",
-                                    "трека в волне",
-                                    "треков в волне",
-                                ),
-                                "в потоке",
-                            ))
-                            .when(fetching, |element| {
-                                element
-                                    .child(divider_vertical(theme))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(space::XS))
-                                            .child(Spinner::new().size(12.0))
-                                            .child(
-                                                div()
-                                                    .text_size(px(text::XS))
-                                                    .text_color(theme.colors.text_muted)
-                                                    .child("Добавляем треки…"),
-                                            ),
-                                    )
-                            }),
+                            .gap(px(space::MD))
+                            .pt(px(space::SM))
+                            .child(
+                                IconButton::new("wave-previous", icons::PREVIOUS)
+                                    .size(44.0)
+                                    .icon_size(18.0)
+                                    .variant(ButtonVariant::Secondary)
+                                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                        this.play_previous(cx)
+                                    })),
+                            )
+                            .child(
+                                IconButton::new(
+                                    "wave-toggle",
+                                    if playing { icons::PAUSE } else { icons::PLAY },
+                                )
+                                .size(62.0)
+                                .icon_size(24.0)
+                                .variant(ButtonVariant::Primary)
+                                .disabled(self.player.loading)
+                                .on_click(cx.listener(
+                                    |this, _: &gpui::ClickEvent, _, cx| this.toggle_playback(cx),
+                                )),
+                            )
+                            .child(
+                                IconButton::new("wave-next", icons::NEXT)
+                                    .size(44.0)
+                                    .icon_size(18.0)
+                                    .variant(ButtonVariant::Secondary)
+                                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                        this.play_next(cx)
+                                    })),
+                            )
+                            .child(
+                                IconButton::new(
+                                    "wave-like",
+                                    if liked {
+                                        icons::HEART
+                                    } else {
+                                        icons::HEART_OUTLINE
+                                    },
+                                )
+                                .size(44.0)
+                                .icon_size(18.0)
+                                .variant(if liked {
+                                    ButtonVariant::Soft
+                                } else {
+                                    ButtonVariant::Secondary
+                                })
+                                .on_click(cx.listener(
+                                    |this, _: &gpui::ClickEvent, _, cx| this.toggle_like(cx),
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .pt(px(space::SM))
+                            .text_size(px(text::XS))
+                            .text_color(theme.colors.text_muted)
+                            .child("Волна продолжится автоматически"),
+                    );
+
+            if let Some(error) = &error {
+                poster = poster.child(error_banner(theme, error));
+            }
+            poster
+        } else {
+            let mut intro = div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(space::LG))
+                .child(
+                    div()
+                        .size(px(112.0))
+                        .rounded(px(30.0))
+                        .bg(theme.colors.accent_soft)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Icon::new(icons::SPARKLES)
+                                .size(52.0)
+                                .color(theme.colors.accent),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(40.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child("Моя волна"),
+                )
+                .child(
+                    Button::new("wave-start", "Включить волну")
+                        .variant(ButtonVariant::Primary)
+                        .icon(icons::SPARKLES)
+                        .loading(loading)
+                        .on_click(
+                            cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.play_wave(cx)),
+                        ),
+                );
+
+            if loading {
+                intro = intro.child(Spinner::new().size(18.0).color(theme.colors.accent));
+            }
+            if let Some(error) = &error {
+                intro = intro.child(error_banner(theme, error));
+            }
+            intro
+        };
+
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .overflow_hidden()
+            .bg(palette.0)
+            .child(immersive_background(palette, backdrop, phase))
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .items_center()
+                    .justify_center()
+                    .p(px(space::XL))
+                    .child(content),
+            )
+            .into_any_element()
+    }
+
+    fn artist_tracks_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let content = self.artist_tracks_content(theme, cx);
+        self.app_shell(theme, cx, content)
+    }
+
+    fn artist_tracks_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let artist_name = self
+            .artist
+            .artist
+            .as_ref()
+            .map(|artist| artist.display_name().to_string())
+            .unwrap_or_else(|| "Артист".to_string());
+        let tracks = self.artist.all_tracks.clone();
+        let loading = self.artist.all_tracks_loading;
+        let error = self.artist.all_tracks_error.clone();
+        let current_id = self.player.track.as_ref().map(|track| track.id.clone());
+        let playing = self.player.playing;
+        let track_count = self
+            .artist
+            .artist
+            .as_ref()
+            .and_then(|artist| artist.counts.as_ref().map(|counts| counts.tracks))
+            .filter(|count| *count > 0)
+            .unwrap_or(tracks.len() as u64);
+
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                Button::new("back-from-artist-tracks", "Назад")
+                    .variant(ButtonVariant::Ghost)
+                    .icon(icons::CHEVRON_LEFT)
+                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                        this.navigate_back(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(space::SM))
+                    .child(
+                        Button::new("artist-tracks-play", "Слушать")
+                            .variant(ButtonVariant::Primary)
+                            .icon(icons::PLAY)
+                            .disabled(tracks.is_empty() || loading)
+                            .on_click(cx.listener({
+                                let tracks = tracks.clone();
+                                move |this, _: &gpui::ClickEvent, _, cx| {
+                                    this.play_context_all(tracks.clone(), false, cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("artist-tracks-shuffle", "Перемешать")
+                            .variant(ButtonVariant::Secondary)
+                            .icon(icons::SHUFFLE)
+                            .disabled(tracks.is_empty() || loading)
+                            .on_click(cx.listener({
+                                let tracks = tracks.clone();
+                                move |this, _: &gpui::ClickEvent, _, cx| {
+                                    this.play_context_all(tracks.clone(), true, cx);
+                                }
+                            })),
                     ),
             );
 
-        let mut body = div().w_full().flex().flex_col().gap(px(space::LG));
-
+        let mut list = card(theme).child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(section_title(theme, "Все треки"))
+                .child(
+                    Badge::new(format::plural(track_count, "трек", "трека", "треков"))
+                        .tone(BadgeTone::Neutral),
+                ),
+        );
+        if let Some(error) = error {
+            list = list.child(error_banner(theme, &error));
+        }
         if loading && tracks.is_empty() {
-            body = body.child(
-                card(theme)
-                    .items_center()
+            list = list.child(
+                div()
                     .py(px(space::XXL))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(space::SM))
                     .child(Spinner::new().size(24.0).color(theme.colors.accent))
                     .child(
                         div()
                             .text_size(px(text::SM))
                             .text_color(theme.colors.text_secondary)
-                            .child("Собираем вашу волну…"),
+                            .child("Загружаем треки артиста…"),
                     ),
             );
+        } else if tracks.is_empty() {
+            list = list.child(
+                div()
+                    .py(px(space::XL))
+                    .text_size(px(text::SM))
+                    .text_color(theme.colors.text_muted)
+                    .text_center()
+                    .child("У этого артиста пока нет доступных треков."),
+            );
         } else {
-            if let Some(error) = error {
-                body = body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(space::SM))
-                        .child(error_banner(theme, &error))
-                        .child(
-                            div().flex().justify_center().child(
-                                Button::new("wave-retry", "Попробовать снова")
-                                    .variant(ButtonVariant::Secondary)
-                                    .icon(icons::REFRESH)
-                                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                        this.play_wave(cx);
-                                    })),
-                            ),
-                        ),
-                );
-            }
-
-            if tracks.is_empty() && !loading {
-                body = body.child(empty_search_state(
-                    theme,
-                    icons::SPARKLES,
-                    "Волна пока молчит",
-                    "Нажмите «Включить волну», чтобы получить первую партию треков.",
-                ));
-            } else {
-                let mut list = card(theme).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(section_title(theme, "В потоке"))
-                        .child(
-                            Badge::new(format::plural(
-                                tracks.len() as u64,
-                                "трек",
-                                "трека",
-                                "треков",
-                            ))
-                            .tone(BadgeTone::Neutral),
-                        ),
-                );
-
-                let context = tracks.clone();
-                for (index, track) in tracks.iter().enumerate() {
-                    let is_current = current_id.as_deref() == Some(track.id.as_str());
-                    let cover = self.covers.get(&track.id).cloned();
-                    let row = TrackRow::new(
-                        ElementId::Name(SharedString::from(format!(
-                            "wave-track-{}-{index}",
-                            track.id
-                        ))),
-                        index + 1,
-                        track.display_title().to_string(),
-                        track.artist_names(),
-                        format::duration_or_dash(track.duration()),
-                    )
-                    .cover(cover)
-                    .current(is_current, playing)
-                    .on_play(cx.listener({
-                        let track = track.clone();
-                        let context = context.clone();
-                        move |this, _: &gpui::ClickEvent, _, cx| {
-                            this.play_wave_track(track.clone(), context.clone(), cx);
-                        }
-                    }));
-
-                    list = list.child(row);
-                }
-
-                body = body.child(list).child(
-                    div().flex().items_center().justify_center().child(
-                        Button::new("wave-add-more", "Добавить ещё треков")
-                            .variant(ButtonVariant::Ghost)
-                            .icon(icons::REFRESH)
-                            .loading(fetching)
-                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.wave_more(cx);
-                            })),
-                    ),
-                );
+            let context = tracks.clone();
+            for (index, track) in tracks.iter().enumerate() {
+                let is_current = current_id.as_deref() == Some(track.id.as_str());
+                let cover = self.covers.get(&track.id).cloned();
+                let mut row = TrackRow::new(
+                    ElementId::Name(SharedString::from(format!(
+                        "artist-all-track-{}-{index}",
+                        track.id
+                    ))),
+                    index + 1,
+                    track.display_title().to_string(),
+                    track.artist_names(),
+                    format::duration_or_dash(track.duration()),
+                )
+                .cover(cover)
+                .current(is_current, playing)
+                .animation_phase(self.animation_phase)
+                .on_play(cx.listener({
+                    let track = track.clone();
+                    let context = context.clone();
+                    move |this, _: &gpui::ClickEvent, _, cx| {
+                        this.play_context_track(track.clone(), context.clone(), cx);
+                    }
+                }));
+                row = track_navigation(row, track, cx);
+                list = list.child(row);
             }
         }
 
@@ -3230,34 +3468,196 @@ impl RootView {
             .flex_1()
             .min_w(px(0.0))
             .h_full()
-            .id("wave-scroll")
+            .id("artist-tracks-scroll")
             .overflow_y_scroll()
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .justify_center()
+                div().w_full().flex().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(1180.0))
+                        .p(px(space::XL))
+                        .flex()
+                        .flex_col()
+                        .gap(px(space::LG))
+                        .child(header)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .child(
+                                    div()
+                                        .text_size(px(text::DISPLAY))
+                                        .font_weight(gpui::FontWeight::BOLD)
+                                        .child("Треки артиста"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(text::SM))
+                                        .text_color(theme.colors.text_secondary)
+                                        .child(artist_name),
+                                ),
+                        )
+                        .child(list),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn artist_albums_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let content = self.artist_albums_content(theme, cx);
+        self.app_shell(theme, cx, content)
+    }
+
+    fn artist_albums_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let artist_name = self
+            .artist
+            .artist
+            .as_ref()
+            .map(|artist| artist.display_name().to_string())
+            .unwrap_or_else(|| "Артист".to_string());
+        let albums = self.artist.all_albums.clone();
+        let loading = self.artist.all_albums_loading;
+        let error = self.artist.all_albums_error.clone();
+
+        let header = div().flex().items_center().child(
+            Button::new("back-from-artist-albums", "Назад")
+                .variant(ButtonVariant::Ghost)
+                .icon(icons::CHEVRON_LEFT)
+                .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                    this.navigate_back(cx);
+                })),
+        );
+
+        let mut body = div().w_full().flex().flex_col().gap(px(space::LG));
+        if let Some(error) = error {
+            body = body.child(error_banner(theme, &error));
+        }
+        if loading && albums.is_empty() {
+            body = body.child(
+                card(theme)
+                    .items_center()
+                    .py(px(space::XXL))
+                    .child(Spinner::new().size(24.0).color(theme.colors.accent))
                     .child(
                         div()
-                            .w_full()
-                            .max_w(px(1180.0))
-                            .p(px(space::XL))
-                            .flex()
-                            .flex_col()
-                            .gap(px(space::LG))
-                            .child(header)
-                            .child(hero)
-                            .child(body)
-                            .child(
-                                div()
-                                    .pt(px(space::SM))
-                                    .text_size(px(text::XS))
-                                    .text_color(theme.colors.text_muted)
-                                    .child(
-                                        "Волна продолжается автоматически: следующая партия загружается по мере воспроизведения.",
-                                    ),
-                            ),
+                            .text_size(px(text::SM))
+                            .text_color(theme.colors.text_secondary)
+                            .child("Загружаем альбомы…"),
                     ),
+            );
+        } else if albums.is_empty() {
+            body = body.child(empty_search_state(
+                theme,
+                icons::MUSIC,
+                "Альбомов пока нет",
+                "У этого артиста нет доступных альбомов.",
+            ));
+        } else {
+            let columns = if self.viewport_width < 1100.0 { 2 } else { 3 };
+            let mut grid = div().w_full().grid().grid_cols(columns).gap(px(space::LG));
+            for album in &albums {
+                let id = album.id.unwrap_or(0);
+                let cover = self.search_images.get(&format!("album-{id}")).cloned();
+                let title = album.display_title().to_string();
+                let meta = match (album.year, album.track_count) {
+                    (Some(year), Some(count)) => format!(
+                        "{year} · {}",
+                        format::plural(count, "трек", "трека", "треков")
+                    ),
+                    (Some(year), None) => year.to_string(),
+                    (None, Some(count)) => format::plural(count, "трек", "трека", "треков"),
+                    (None, None) => "Альбом".to_string(),
+                };
+                let album_for_click = album.clone();
+                grid = grid.child(
+                    div()
+                        .id(ElementId::Name(SharedString::from(format!(
+                            "artist-all-album-{id}"
+                        ))))
+                        .flex()
+                        .flex_col()
+                        .gap(px(space::SM))
+                        .p(px(space::SM))
+                        .rounded(px(14.0))
+                        .bg(theme.colors.surface)
+                        .border_1()
+                        .border_color(theme.colors.border)
+                        .cursor_pointer()
+                        .hover(|style| {
+                            style
+                                .bg(theme.colors.surface_hover)
+                                .border_color(theme.colors.accent)
+                        })
+                        .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+                            this.open_album(id, Some(album_for_click.clone()), cx);
+                        }))
+                        .child(playlist_cover(theme, cover, 150.0))
+                        .child(
+                            div()
+                                .px(px(space::XS))
+                                .flex()
+                                .flex_col()
+                                .gap(px(1.0))
+                                .child(
+                                    div()
+                                        .text_size(px(text::BASE))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(text::XS))
+                                        .text_color(theme.colors.text_muted)
+                                        .child(meta),
+                                ),
+                        ),
+                );
+            }
+            body = body.child(grid);
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .id("artist-albums-scroll")
+            .overflow_y_scroll()
+            .child(
+                div().w_full().flex().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(1180.0))
+                        .p(px(space::XL))
+                        .flex()
+                        .flex_col()
+                        .gap(px(space::LG))
+                        .child(header)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .child(
+                                    div()
+                                        .text_size(px(text::DISPLAY))
+                                        .font_weight(gpui::FontWeight::BOLD)
+                                        .child("Альбомы артиста"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(text::SM))
+                                        .text_color(theme.colors.text_secondary)
+                                        .child(artist_name),
+                                ),
+                        )
+                        .child(body),
+                ),
             )
             .into_any_element()
     }
@@ -3699,6 +4099,7 @@ impl RootView {
                 )
                 .cover(track_cover)
                 .current(is_current, playing)
+                .animation_phase(self.animation_phase)
                 .on_play(cx.listener({
                     let track = track.clone();
                     move |this, _: &gpui::ClickEvent, _, cx| {
@@ -3706,6 +4107,7 @@ impl RootView {
                     }
                 }));
 
+                let row = track_navigation(row, track, cx);
                 list = list.child(row);
             }
 
@@ -3932,6 +4334,8 @@ fn screen_title(screen: &Screen) -> &'static str {
         Screen::Search => "Поиск",
         Screen::Playlists | Screen::Playlist => "Плейлисты",
         Screen::Artist => "Артист",
+        Screen::ArtistTracks => "Треки артиста",
+        Screen::ArtistAlbums => "Альбомы артиста",
         Screen::Album => "Альбом",
         Screen::Track => "Трек",
         Screen::Wave => "Моя волна",
@@ -4079,6 +4483,104 @@ fn resize_handle(id: &'static str, edge: ResizeEdge, cursor: CursorStyle) -> Sta
         })
 }
 
+fn track_navigation(row: TrackRow, track: &Track, cx: &mut Context<RootView>) -> TrackRow {
+    let track_for_title = track.clone();
+    let row = row.on_title(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+        this.open_track_from_screen(track_for_title.clone(), cx);
+    }));
+
+    if let Some(artist) = track.artists.first().cloned()
+        && let Some(artist_id) = artist.id
+    {
+        let artist_for_click = artist.clone();
+        row.on_artist(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+            this.open_artist(artist_id, Some(artist_for_click.clone()), cx);
+        }))
+    } else {
+        row
+    }
+}
+
+fn glass_card(theme: &Theme) -> Div {
+    div()
+        .w_full()
+        .rounded(px(18.0))
+        .bg(rgba(0x0808088C))
+        .border_1()
+        .border_color(rgba(0xFFFFFF29))
+        .p(px(20.0))
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .shadow_lg()
+        .text_color(theme.colors.white)
+}
+
+fn immersive_background(
+    palette: (Rgba, Rgba),
+    backdrop: Option<Arc<Image>>,
+    phase: u8,
+) -> AnyElement {
+    let (base, glow) = palette;
+    let angle = 110.0 + (phase as f32 * 3.0) % 360.0;
+    let base_hsla: Hsla = base.into();
+    let glow_hsla: Hsla = glow.into();
+
+    let mut layer = div()
+        .absolute()
+        .top(px(0.0))
+        .left(px(0.0))
+        .size_full()
+        .bg(base);
+
+    if let Some(backdrop) = backdrop {
+        layer = layer.child(
+            img(ImageSource::Image(backdrop))
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .opacity(0.78),
+        );
+    }
+
+    layer
+        .child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full()
+                .bg(linear_gradient(
+                    angle,
+                    linear_color_stop(glow_hsla.opacity(0.80), 0.0),
+                    linear_color_stop(base_hsla.opacity(0.12), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full()
+                .bg(linear_gradient(
+                    (angle + 140.0) % 360.0,
+                    linear_color_stop(base_hsla.opacity(0.78), 0.0),
+                    linear_color_stop(glow_hsla.opacity(0.18), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full()
+                .bg(rgba(0x05050559)),
+        )
+        .into_any_element()
+}
+
 // ------------------------------------------------------------------ Helpers
 
 fn brand(theme: &Theme, large: bool) -> Div {
@@ -4210,6 +4712,34 @@ fn card(theme: &Theme) -> Div {
         .flex()
         .flex_col()
         .gap(px(6.0))
+}
+
+fn glass_info_row(theme: &Theme, label: &str, value: String) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(space::MD))
+        .py(px(6.0))
+        .border_b_1()
+        .border_color(rgba(0xFFFFFF24))
+        .child(
+            div()
+                .text_size(px(text::SM))
+                .text_color(rgba(0xFFFFFFA6))
+                .child(label.to_string()),
+        )
+        .child(
+            div()
+                .text_size(px(text::SM))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(theme.colors.white)
+                .max_w(px(280.0))
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(value),
+        )
 }
 
 fn info_row(theme: &Theme, label: &str, value: String) -> Div {

@@ -3,8 +3,8 @@
 use crate::audio::AudioEngine;
 use crate::{config, demo, format};
 use gpui::{
-    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Image, Subscription, Task, Timer,
-    WeakEntity, actions, prelude::*,
+    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Hsla, Image, Rgba, Subscription,
+    Task, Timer, WeakEntity, actions, prelude::*,
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
@@ -40,6 +40,8 @@ pub(crate) enum Screen {
     Playlists,
     Playlist,
     Artist,
+    ArtistTracks,
+    ArtistAlbums,
     Album,
     Track,
     Wave,
@@ -56,6 +58,12 @@ pub(crate) struct ArtistState {
     pub(crate) loading: bool,
     pub(crate) error: Option<String>,
     pub(crate) epoch: u64,
+    pub(crate) all_tracks: Vec<Track>,
+    pub(crate) all_tracks_loading: bool,
+    pub(crate) all_tracks_error: Option<String>,
+    pub(crate) all_albums: Vec<Album>,
+    pub(crate) all_albums_loading: bool,
+    pub(crate) all_albums_error: Option<String>,
 }
 
 /// Tracks fetched for "Моя волна".
@@ -216,7 +224,13 @@ pub struct RootView {
     pub(crate) artist: ArtistState,
     pub(crate) album: AlbumState,
     pub(crate) wave: WaveState,
+    pub(crate) page_track: Option<Track>,
+    pub(crate) page_context: Vec<Track>,
+    pub(crate) track_palettes: HashMap<String, (Rgba, Rgba)>,
+    pub(crate) track_backdrops: HashMap<String, Arc<Image>>,
+    backdrop_loading: HashSet<String>,
     pub(crate) queue_source: QueueSource,
+    pub(crate) animation_phase: u8,
     pub(crate) nav_stack: Vec<Screen>,
     pub(crate) search_images: HashMap<String, Arc<Image>>,
     pub(crate) show_token_input: bool,
@@ -303,7 +317,13 @@ impl RootView {
             artist: ArtistState::default(),
             album: AlbumState::default(),
             wave: WaveState::default(),
+            page_track: None,
+            page_context: Vec::new(),
+            track_palettes: HashMap::new(),
+            track_backdrops: HashMap::new(),
+            backdrop_loading: HashSet::new(),
             queue_source: QueueSource::Liked,
+            animation_phase: 0,
             nav_stack: Vec::new(),
             search_images: HashMap::new(),
             show_token_input: false,
@@ -370,9 +390,16 @@ impl RootView {
     fn spawn_ticker(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
-                Timer::after(Duration::from_millis(500)).await;
+                Timer::after(Duration::from_millis(200)).await;
 
                 let updated = this.update(cx, |this, cx| {
+                    let immersive = matches!(this.screen, Screen::Track | Screen::Wave);
+                    if immersive || this.player.playing {
+                        this.animation_phase = this.animation_phase.wrapping_add(1);
+                    }
+                    if immersive {
+                        cx.notify();
+                    }
                     if !this.player.playing || this.player.loading {
                         return;
                     }
@@ -380,7 +407,7 @@ impl RootView {
                     let mut finished = false;
 
                     if this.demo {
-                        this.player.position += Duration::from_millis(500);
+                        this.player.position += Duration::from_millis(200);
                         if let Some(duration) = this.player.track.as_ref().map(Track::duration)
                             && this.player.position >= duration
                         {
@@ -615,6 +642,11 @@ impl RootView {
         self.artist = ArtistState::default();
         self.album = AlbumState::default();
         self.wave = WaveState::default();
+        self.page_track = None;
+        self.page_context.clear();
+        self.track_palettes.clear();
+        self.track_backdrops.clear();
+        self.backdrop_loading.clear();
         self.queue_source = QueueSource::Liked;
         self.nav_stack.clear();
         self.reset_playlists();
@@ -643,6 +675,11 @@ impl RootView {
         self.artist = ArtistState::default();
         self.album = AlbumState::default();
         self.wave = WaveState::default();
+        self.page_track = None;
+        self.page_context.clear();
+        self.track_palettes.clear();
+        self.track_backdrops.clear();
+        self.backdrop_loading.clear();
         self.queue_source = QueueSource::Liked;
         self.nav_stack.clear();
         self.reset_playlists();
@@ -744,6 +781,7 @@ impl RootView {
                 let Some(bytes) = bytes else {
                     continue;
                 };
+                let palette = cover_palette(&bytes);
                 let Some(image) = decode_image(bytes) else {
                     continue;
                 };
@@ -752,6 +790,9 @@ impl RootView {
                     .update(cx, |this, cx| {
                         if this.profile_epoch != epoch {
                             return false;
+                        }
+                        if let Some(palette) = palette {
+                            this.track_palettes.insert(track_id.clone(), palette);
                         }
                         this.covers.insert(track_id, image);
                         cx.notify();
@@ -803,12 +844,21 @@ impl RootView {
         self.artist = ArtistState::default();
         self.album = AlbumState::default();
         self.wave = WaveState::default();
+        self.page_track = None;
+        self.page_context.clear();
+        self.track_palettes.clear();
+        self.track_backdrops.clear();
+        self.backdrop_loading.clear();
         self.queue_source = QueueSource::Liked;
         self.nav_stack.clear();
         self.reset_playlists();
 
         let tracks = demo::tracks();
         self.covers = demo::covers(&tracks);
+        for (index, track) in tracks.iter().enumerate() {
+            self.track_palettes
+                .insert(track.id.clone(), demo::cover_palette(index));
+        }
         self.profile = Some(ProfileData {
             status: demo::status(),
             liked: demo::liked(&tracks),
@@ -820,6 +870,7 @@ impl RootView {
     }
 
     fn start_demo_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        self.audio.stop();
         self.cache_track(&track);
         self.playback_epoch += 1;
         self.player.track = Some(track.clone());
@@ -830,6 +881,9 @@ impl RootView {
         self.player.error = None;
         self.player.quality = Some("MP3 · 320 кбит/с · демо".into());
         self.player.audio_ready = true;
+        if matches!(self.screen, Screen::Track | Screen::Wave) {
+            self.load_track_backdrop(track, cx);
+        }
         self.schedule_state_save(cx);
         cx.notify();
     }
@@ -1158,13 +1212,21 @@ impl RootView {
         })
     }
 
+    pub(crate) fn is_liked(&self, track: &Track) -> bool {
+        self.is_track_liked(track)
+    }
+
     pub(crate) fn toggle_like(&mut self, cx: &mut Context<Self>) {
-        if self.like_busy {
-            return;
-        }
         let Some(track) = self.player.track.clone() else {
             return;
         };
+        self.toggle_like_track(track, cx);
+    }
+
+    pub(crate) fn toggle_like_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        if self.like_busy {
+            return;
+        }
         let liked = self.is_track_liked(&track);
 
         if self.demo {
@@ -1211,7 +1273,7 @@ impl RootView {
 
     fn apply_like_state(&mut self, track: Track, liked: bool) {
         let full_id = track.full_id();
-        let existing_cover = self.player.cover.clone();
+        let existing_cover = self.covers.get(&track.id).cloned();
         let Some(profile) = self.profile.as_mut() else {
             return;
         };
@@ -1272,7 +1334,7 @@ impl RootView {
             Screen::Search => "search",
             Screen::Playlists => "playlists",
             Screen::Playlist => "playlist",
-            Screen::Artist => "artist",
+            Screen::Artist | Screen::ArtistTracks | Screen::ArtistAlbums => "artist",
             Screen::Album => "album",
             Screen::Track => "track",
             Screen::Wave => "wave",
@@ -1302,6 +1364,14 @@ impl RootView {
             queue: self.queue.clone(),
             queue_index: self.queue_index,
             track_id: self.player.track.as_ref().map(|track| track.id.clone()),
+            page_track_id: if matches!(self.screen, Screen::Track) {
+                self.page_track
+                    .as_ref()
+                    .map(|track| track.id.clone())
+                    .or_else(|| self.player.track.as_ref().map(|track| track.id.clone()))
+            } else {
+                None
+            },
             position_ms: self.player.position.as_millis().min(u64::MAX as u128) as u64,
             quality: self.player.quality.clone(),
             queue_open: self.queue_open,
@@ -1312,7 +1382,10 @@ impl RootView {
                 .as_ref()
                 .map(|playlist| playlist.playlist_id())
                 .filter(|id| !id.is_empty()),
-            artist_id: if matches!(self.screen, Screen::Artist) {
+            artist_id: if matches!(
+                self.screen,
+                Screen::Artist | Screen::ArtistTracks | Screen::ArtistAlbums
+            ) {
                 self.artist.id
             } else {
                 None
@@ -1400,7 +1473,8 @@ impl RootView {
             "wave" => Screen::Wave,
             _ => Screen::Profile,
         };
-        if self.screen == Screen::Track && state.track_id.is_none() {
+        if self.screen == Screen::Track && state.track_id.is_none() && state.page_track_id.is_none()
+        {
             self.screen = Screen::Profile;
         }
 
@@ -1448,6 +1522,60 @@ impl RootView {
                 .ok();
             })
             .detach();
+        }
+
+        if self.screen == Screen::Track {
+            let page_id = state
+                .page_track_id
+                .clone()
+                .or_else(|| state.track_id.clone());
+            if let Some(page_id) = page_id {
+                if let Some(current) = self
+                    .player
+                    .track
+                    .clone()
+                    .filter(|track| track.id == page_id)
+                {
+                    self.page_track = Some(current);
+                } else if let Some(known) = self.profile.as_ref().and_then(|profile| {
+                    profile
+                        .sample
+                        .iter()
+                        .find(|track| track.id == page_id)
+                        .cloned()
+                }) {
+                    self.page_track = Some(known);
+                } else if let Some(cached) = self.queue_track_cache.get(&page_id).cloned() {
+                    self.page_track = Some(cached);
+                } else if !self.demo && self.client.token().is_some() {
+                    let client = self.client.clone();
+                    let epoch = self.profile_epoch;
+                    cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                        let result = cx
+                            .background_spawn(async move { client.track(&page_id) })
+                            .await;
+                        this.update(cx, |this, cx| {
+                            if this.profile_epoch == epoch
+                                && let Ok(track) = result
+                            {
+                                this.load_covers(vec![track.clone()], cx);
+                                this.load_track_backdrop(track.clone(), cx);
+                                this.page_track = Some(track);
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                    })
+                    .detach();
+                }
+            }
+            if self.page_track.is_none() {
+                self.page_track = self.player.track.clone();
+            }
+            if let Some(track) = self.page_track.clone() {
+                self.load_covers(vec![track.clone()], cx);
+                self.load_track_backdrop(track, cx);
+            }
         }
 
         if self.screen == Screen::Playlist {
@@ -1524,17 +1652,112 @@ impl RootView {
         self.player.audio_ready = false;
         self.player.quality = quality;
         self.player.error = None;
-        self.load_covers(vec![track], cx);
+        self.load_covers(vec![track.clone()], cx);
+        if matches!(self.screen, Screen::Track | Screen::Wave) {
+            self.load_track_backdrop(track, cx);
+        }
         cx.notify();
     }
 
+    // ------------------------------------------------------------- Cover mood
+
+    /// Yandex-yellow fallback palette for tracks without a cover.
+    pub(crate) fn track_palette(&self, track_id: &str) -> (Rgba, Rgba) {
+        self.track_palettes
+            .get(track_id)
+            .copied()
+            .unwrap_or_else(default_palette)
+    }
+
+    pub(crate) fn track_backdrop(&self, track_id: &str) -> Option<Arc<Image>> {
+        self.track_backdrops.get(track_id).cloned()
+    }
+
+    pub(crate) fn load_track_backdrop(&mut self, track: Track, cx: &mut Context<Self>) {
+        let id = track.id.clone();
+        if self.track_backdrops.contains_key(&id) || self.backdrop_loading.contains(&id) {
+            return;
+        }
+        let Some(url) = track.cover_url(600) else {
+            return;
+        };
+        self.backdrop_loading.insert(id.clone());
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let bytes = cx
+                .background_spawn(async move { client.download_image(&url).ok() })
+                .await;
+            let Some(bytes) = bytes else {
+                let _ = this.update(cx, |this, _| {
+                    this.backdrop_loading.remove(&id);
+                });
+                return;
+            };
+            let palette = cover_palette(&bytes);
+            let backdrop = blurred_cover(&bytes);
+            this.update(cx, |this, cx| {
+                this.backdrop_loading.remove(&id);
+                if this.profile_epoch != epoch {
+                    return;
+                }
+                if let Some(palette) = palette {
+                    this.track_palettes.insert(id.clone(), palette);
+                }
+                if let Some(backdrop) = backdrop {
+                    this.track_backdrops.insert(id, backdrop);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     // ------------------------------------------------------------------- Wave
+
+    fn fresh_wave_tracks(
+        incoming: Vec<Track>,
+        existing: &[Track],
+        queue: Option<&[String]>,
+    ) -> Vec<Track> {
+        let mut seen: HashSet<String> = HashSet::new();
+        for track in existing {
+            seen.insert(track.id.clone());
+            seen.insert(track.full_id());
+        }
+        if let Some(queue) = queue {
+            for id in queue {
+                seen.insert(id.clone());
+                seen.insert(id.split(':').next().unwrap_or(id).to_string());
+            }
+        }
+
+        incoming
+            .into_iter()
+            .filter(|track| {
+                let id = track.id.clone();
+                let full_id = track.full_id();
+                if seen.contains(&id) || seen.contains(&full_id) {
+                    false
+                } else {
+                    seen.insert(id);
+                    seen.insert(full_id);
+                    true
+                }
+            })
+            .collect()
+    }
 
     pub(crate) fn open_wave(&mut self, cx: &mut Context<Self>) {
         if matches!(self.screen, Screen::Login | Screen::Loading) {
             return;
         }
         self.screen = Screen::Wave;
+        if let Some(track) = self.player.track.clone() {
+            self.load_track_backdrop(track, cx);
+        }
         self.nav_stack.clear();
         self.queue_open = false;
         if !self.wave.loaded && !self.wave.loading {
@@ -1571,10 +1794,20 @@ impl RootView {
             } else {
                 sample.clone()
             };
+            let existing = self.wave.tracks.clone();
+            let incoming = Self::fresh_wave_tracks(
+                incoming,
+                &existing,
+                if append { Some(&self.queue) } else { None },
+            );
             if incoming.is_empty() {
                 self.wave.loading = false;
                 self.wave.fetching = false;
-                self.wave.error = Some("Демо-коллекция пуста.".into());
+                self.wave.error = Some(if append {
+                    "В демо-коллекции больше нет новых треков.".into()
+                } else {
+                    "Демо-коллекция пуста.".into()
+                });
                 cx.notify();
                 return;
             }
@@ -1632,10 +1865,18 @@ impl RootView {
                 this.wave.fetching = false;
                 match result {
                     Ok(batch) => {
-                        let incoming = batch.tracks();
+                        let incoming = Self::fresh_wave_tracks(
+                            batch.tracks(),
+                            &this.wave.tracks,
+                            if append { Some(&this.queue) } else { None },
+                        );
                         if incoming.is_empty() {
-                            this.wave.error =
-                                Some("Волна не вернула треки. Попробуйте ещё раз.".into());
+                            this.wave.error = Some(if append {
+                                "Волна вернула только уже знакомые треки. Попробуйте ещё раз."
+                                    .into()
+                            } else {
+                                "Волна не вернула треки. Попробуйте ещё раз.".into()
+                            });
                         } else {
                             this.wave.loaded = true;
                             this.wave.error = None;
@@ -1696,43 +1937,6 @@ impl RootView {
         }
     }
 
-    pub(crate) fn shuffle_wave(&mut self, cx: &mut Context<Self>) {
-        if self.wave.tracks.is_empty() {
-            self.load_wave(false, true, cx);
-            return;
-        }
-        let index = rand::rng().random_range(0..self.wave.tracks.len());
-        self.start_wave_queue(index, cx);
-    }
-
-    pub(crate) fn wave_more(&mut self, cx: &mut Context<Self>) {
-        self.load_wave(true, false, cx);
-    }
-
-    pub(crate) fn play_wave_track(
-        &mut self,
-        track: Track,
-        tracks: Vec<Track>,
-        cx: &mut Context<Self>,
-    ) {
-        if tracks.is_empty() {
-            return;
-        }
-        for item in &tracks {
-            self.cache_track(item);
-        }
-        self.queue_source = QueueSource::Wave;
-        self.queue = tracks.iter().map(Track::full_id).collect();
-        let index = tracks
-            .iter()
-            .position(|item| item.id == track.id)
-            .unwrap_or(0);
-        self.play_queue_index(index, cx);
-        self.schedule_state_save(cx);
-    }
-
-    // --------------------------------------------------------- Artist / Album
-
     fn push_navigation(&mut self) {
         if !matches!(
             self.screen,
@@ -1750,14 +1954,94 @@ impl RootView {
     }
 
     pub(crate) fn open_track_page(&mut self, cx: &mut Context<Self>) {
-        if self.player.track.is_none() || matches!(self.screen, Screen::Login | Screen::Loading) {
+        let Some(track) = self.player.track.clone() else {
+            return;
+        };
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.open_track(track, Vec::new(), cx);
+    }
+
+    pub(crate) fn open_track(&mut self, track: Track, context: Vec<Track>, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
             return;
         }
         self.push_navigation();
+        self.load_covers(vec![track.clone()], cx);
+        self.page_context = context;
+        self.page_track = Some(track.clone());
         self.screen = Screen::Track;
         self.queue_open = false;
+        self.load_track_backdrop(track, cx);
         self.schedule_state_save(cx);
         cx.notify();
+    }
+
+    pub(crate) fn open_track_from_queue(&mut self, track: Track, cx: &mut Context<Self>) {
+        let context = self
+            .queue
+            .iter()
+            .filter_map(|id| self.queue_track_cache.get(id).cloned())
+            .collect::<Vec<_>>();
+        self.open_track(track, context, cx);
+    }
+
+    pub(crate) fn open_track_from_screen(&mut self, track: Track, cx: &mut Context<Self>) {
+        let context = match self.screen {
+            Screen::Liked => self
+                .profile
+                .as_ref()
+                .map(|profile| profile.sample.clone())
+                .unwrap_or_default(),
+            Screen::Search => self.search.results.clone(),
+            Screen::Playlist => self.playlists.tracks.clone(),
+            Screen::Artist | Screen::ArtistTracks => {
+                if self.artist.all_tracks.is_empty() {
+                    self.artist.tracks.clone()
+                } else {
+                    self.artist.all_tracks.clone()
+                }
+            }
+            Screen::Album => self.album.tracks.clone(),
+            Screen::Wave => self.wave.tracks.clone(),
+            _ => vec![track.clone()],
+        };
+        self.open_track(track, context, cx);
+    }
+
+    pub(crate) fn play_page_track(&mut self, cx: &mut Context<Self>) {
+        let Some(track) = self
+            .page_track
+            .clone()
+            .or_else(|| self.player.track.clone())
+        else {
+            return;
+        };
+        let is_current = self
+            .player
+            .track
+            .as_ref()
+            .is_some_and(|current| current.id == track.id);
+        if is_current {
+            self.toggle_playback(cx);
+            return;
+        }
+        if !self.page_context.is_empty() {
+            let context = self.page_context.clone();
+            self.play_context_track(track, context, cx);
+        } else {
+            self.cache_track(&track);
+            self.queue_source = QueueSource::Liked;
+            self.queue = vec![track.full_id()];
+            self.queue_index = Some(0);
+            if self.demo {
+                self.start_demo_track(track, cx);
+            } else {
+                let id = track.full_id();
+                self.load_and_play(Some(track), id, cx);
+            }
+        }
     }
 
     pub(crate) fn open_artist(
@@ -1822,7 +2106,9 @@ impl RootView {
                 .or_else(|| self.artist.artist.clone());
             self.artist.artist = artist;
             self.artist.tracks = tracks.clone();
-            self.artist.albums = albums;
+            self.artist.albums = albums.clone();
+            self.artist.all_tracks = tracks.clone();
+            self.artist.all_albums = albums;
             self.artist.loading = false;
             self.artist.error = if self.artist.artist.is_none() {
                 Some("Артист не найден в демо-коллекции.".into())
@@ -1854,6 +2140,8 @@ impl RootView {
                         this.artist.artist = Some(artist.clone());
                         this.artist.tracks = tracks.clone();
                         this.artist.albums = albums.clone();
+                        this.artist.all_tracks = tracks.clone();
+                        this.artist.all_albums = albums.clone();
                         this.artist.error = None;
                         this.load_covers(tracks, cx);
                         this.load_entity_images(
@@ -1873,6 +2161,184 @@ impl RootView {
                     }
                     Err(error) => {
                         this.artist.error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn open_artist_tracks(&mut self, cx: &mut Context<Self>) {
+        if self.artist.id.is_none() {
+            return;
+        }
+        self.push_navigation();
+        self.screen = Screen::ArtistTracks;
+        self.queue_open = false;
+        self.schedule_state_save(cx);
+        self.load_all_artist_tracks(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn open_artist_albums(&mut self, cx: &mut Context<Self>) {
+        if self.artist.id.is_none() {
+            return;
+        }
+        self.push_navigation();
+        self.screen = Screen::ArtistAlbums;
+        self.queue_open = false;
+        self.schedule_state_save(cx);
+        self.load_all_artist_albums(cx);
+        cx.notify();
+    }
+
+    fn load_all_artist_tracks(&mut self, cx: &mut Context<Self>) {
+        let Some(artist_id) = self.artist.id else {
+            return;
+        };
+        if self.artist.all_tracks_loading {
+            return;
+        }
+        let total = self
+            .artist
+            .artist
+            .as_ref()
+            .and_then(|artist| artist.counts.as_ref().map(|counts| counts.tracks))
+            .unwrap_or(0);
+        if self.artist.all_tracks.len() as u64 >= total && total > 0 {
+            return;
+        }
+        self.artist.all_tracks_loading = true;
+        self.artist.all_tracks_error = None;
+        cx.notify();
+
+        if self.demo {
+            self.artist.all_tracks = self.artist.tracks.clone();
+            self.artist.all_tracks_loading = false;
+            cx.notify();
+            return;
+        }
+
+        let client = self.client.clone();
+        let epoch = self.artist.epoch;
+        let mut collected = self.artist.all_tracks.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let mut total = total;
+                    for page in ((collected.len() / 50) as u32..).take(20) {
+                        let response = client.artist_tracks(artist_id, page, 50)?;
+                        if let Some(pager) = response.pager.as_ref() {
+                            total = pager.total;
+                        }
+                        if response.tracks.is_empty() {
+                            break;
+                        }
+                        collected.extend(response.tracks);
+                        if total > 0 && collected.len() as u64 >= total {
+                            break;
+                        }
+                    }
+                    Ok::<_, MusicError>((collected, total))
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.artist.epoch != epoch {
+                    return;
+                }
+                this.artist.all_tracks_loading = false;
+                match result {
+                    Ok((tracks, _)) => {
+                        this.artist.all_tracks_error = None;
+                        this.artist.all_tracks = tracks.clone();
+                        this.load_covers(tracks, cx);
+                    }
+                    Err(error) => {
+                        this.artist.all_tracks_error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn load_all_artist_albums(&mut self, cx: &mut Context<Self>) {
+        let Some(artist_id) = self.artist.id else {
+            return;
+        };
+        if self.artist.all_albums_loading {
+            return;
+        }
+        let total = self
+            .artist
+            .artist
+            .as_ref()
+            .and_then(|artist| artist.counts.as_ref().map(|counts| counts.direct_albums))
+            .unwrap_or(0);
+        if self.artist.all_albums.len() as u64 >= total && total > 0 {
+            return;
+        }
+        self.artist.all_albums_loading = true;
+        self.artist.all_albums_error = None;
+        cx.notify();
+
+        if self.demo {
+            self.artist.all_albums = self.artist.albums.clone();
+            self.artist.all_albums_loading = false;
+            cx.notify();
+            return;
+        }
+
+        let client = self.client.clone();
+        let epoch = self.artist.epoch;
+        let mut collected = self.artist.all_albums.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let mut total = total;
+                    for page in ((collected.len() / 50) as u32..).take(20) {
+                        let response = client.artist_albums(artist_id, page, 50)?;
+                        if let Some(pager) = response.pager.as_ref() {
+                            total = pager.total;
+                        }
+                        if response.albums.is_empty() {
+                            break;
+                        }
+                        collected.extend(response.albums);
+                        if total > 0 && collected.len() as u64 >= total {
+                            break;
+                        }
+                    }
+                    Ok::<_, MusicError>((collected, total))
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.artist.epoch != epoch {
+                    return;
+                }
+                this.artist.all_albums_loading = false;
+                match result {
+                    Ok((albums, _)) => {
+                        let covers = albums
+                            .iter()
+                            .filter_map(|album| {
+                                album.id.and_then(|id| {
+                                    album.cover_url(400).map(|url| (format!("album-{id}"), url))
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        this.artist.all_albums_error = None;
+                        this.artist.all_albums = albums;
+                        this.load_entity_images(None, covers, cx);
+                    }
+                    Err(error) => {
+                        this.artist.all_albums_error = Some(error_text(&error));
                     }
                 }
                 cx.notify();
@@ -2675,6 +3141,7 @@ impl RootView {
             return;
         }
 
+        self.audio.stop();
         self.playback_epoch += 1;
         let epoch = self.playback_epoch;
         let client = self.client.clone();
@@ -2714,11 +3181,14 @@ impl RootView {
 
                 match result {
                     Ok((track, downloaded, cover)) => {
-                        if let Some(bytes) = cover
-                            && let Some(image) = decode_image(bytes)
-                        {
-                            this.covers.insert(track.id.clone(), image.clone());
-                            this.player.cover = Some(image);
+                        if let Some(bytes) = cover {
+                            if let Some(palette) = cover_palette(&bytes) {
+                                this.track_palettes.insert(track.id.clone(), palette);
+                            }
+                            if let Some(image) = decode_image(bytes) {
+                                this.covers.insert(track.id.clone(), image.clone());
+                                this.player.cover = Some(image);
+                            }
                         }
 
                         this.cache_track(&track);
@@ -2755,6 +3225,9 @@ impl RootView {
                                 this.player.audio_ready = false;
                                 this.player.error = Some(error);
                             }
+                        }
+                        if matches!(this.screen, Screen::Track | Screen::Wave) {
+                            this.load_track_backdrop(track.clone(), cx);
                         }
                     }
                     Err(error) => {
@@ -2922,6 +3395,107 @@ fn step_index(current: Option<usize>, len: usize, forward: bool) -> usize {
     }
 }
 
+/// A Yandex yellow gradient palette used when a track has no cover.
+fn default_palette() -> (Rgba, Rgba) {
+    (
+        Rgba {
+            r: 0.10,
+            g: 0.085,
+            b: 0.025,
+            a: 1.0,
+        },
+        Rgba {
+            r: 1.0,
+            g: 0.84,
+            b: 0.24,
+            a: 1.0,
+        },
+    )
+}
+
+/// Average the saturated pixels of a cover into a dark base and a bright glow.
+fn cover_palette(bytes: &[u8]) -> Option<(Rgba, Rgba)> {
+    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    let mut samples: Vec<(f32, f32, f32, f32)> = Vec::new();
+
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
+            let pixel = image.get_pixel(x, y);
+            let r = pixel[0] as f32 / 255.0;
+            let g = pixel[1] as f32 / 255.0;
+            let b = pixel[2] as f32 / 255.0;
+            let max = r.max(g).max(b);
+            let min = r.min(g).min(b);
+            let saturation = if max > 0.0 { (max - min) / max } else { 0.0 };
+            if saturation > 0.14 && max > 0.12 {
+                samples.push((saturation, r, g, b));
+            }
+        }
+    }
+
+    if samples.is_empty() {
+        return Some(default_palette());
+    }
+
+    samples.sort_by(|left, right| right.0.total_cmp(&left.0));
+    let take = (samples.len() / 8).clamp(1, 64);
+    let mut red = 0.0f32;
+    let mut green = 0.0f32;
+    let mut blue = 0.0f32;
+    for (_, r, g, b) in samples.iter().take(take) {
+        red += r;
+        green += g;
+        blue += b;
+    }
+    let red = red / take as f32;
+    let green = green / take as f32;
+    let blue = blue / take as f32;
+
+    let average = Rgba {
+        r: red,
+        g: green,
+        b: blue,
+        a: 1.0,
+    };
+    let mut hue: Hsla = average.into();
+    if hue.s < 0.08 {
+        return Some(default_palette());
+    }
+    hue.s = (hue.s * 1.25 + 0.22).min(0.96);
+    let glow: Rgba = Hsla {
+        h: hue.h,
+        s: hue.s,
+        l: 0.6,
+        a: 1.0,
+    }
+    .into();
+    let base: Rgba = Hsla {
+        h: hue.h,
+        s: (hue.s * 0.78).min(0.92),
+        l: 0.115,
+        a: 1.0,
+    }
+    .into();
+    Some((base, glow))
+}
+
+/// Create a small, softly blurred version of the cover for immersive pages.
+fn blurred_cover(bytes: &[u8]) -> Option<Arc<Image>> {
+    let source = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let small = image::imageops::resize(&source, 64, 64, image::imageops::FilterType::Triangle);
+    let blurred = image::imageops::blur(&small, 12.0);
+    let large = image::imageops::resize(&blurred, 512, 512, image::imageops::FilterType::Triangle);
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(large)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .ok()?;
+    Some(Arc::new(Image::from_bytes(
+        gpui::ImageFormat::Png,
+        png.into_inner(),
+    )))
+}
+
 /// Decode downloaded cover bytes into a gpui image.
 pub(crate) fn decode_image(bytes: Vec<u8>) -> Option<Arc<Image>> {
     let format = match image::guess_format(&bytes).ok()? {
@@ -3002,7 +3576,26 @@ pub(crate) fn plus_until(status: &Status) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::step_index;
+    use super::{RootView, step_index};
+    use yandex_music::Track;
+
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            title: None,
+            version: None,
+            available: None,
+            artists: Vec::new(),
+            albums: Vec::new(),
+            cover_uri: None,
+            duration_ms: None,
+            explicit: None,
+            available_for_premium_users: None,
+            preview_duration_ms: None,
+            short_description: None,
+            track_type: None,
+        }
+    }
 
     #[test]
     fn queue_index_wraps_in_both_directions() {
@@ -3013,5 +3606,28 @@ mod tests {
         assert_eq!(step_index(Some(2), 3, false), 1);
         assert_eq!(step_index(Some(5), 3, true), 0);
         assert_eq!(step_index(Some(0), 0, true), 0);
+    }
+
+    #[test]
+    fn wave_batches_never_add_known_tracks() {
+        let existing = vec![track("1")];
+        let queue = vec!["2".to_string(), "3".to_string()];
+        let incoming = vec![track("1"), track("2"), track("3"), track("4")];
+        let fresh = RootView::fresh_wave_tracks(incoming, &existing, Some(&queue));
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].id, "4");
+    }
+
+    #[test]
+    fn initial_wave_batch_drops_internal_duplicates() {
+        let incoming = vec![track("1"), track("1"), track("2")];
+        let fresh = RootView::fresh_wave_tracks(incoming, &[], None);
+        assert_eq!(
+            fresh
+                .iter()
+                .map(|track| track.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["1", "2"]
+        );
     }
 }

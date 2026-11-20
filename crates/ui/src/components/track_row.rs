@@ -18,7 +18,10 @@ pub struct TrackRow {
     cover: Option<Arc<Image>>,
     current: bool,
     playing: bool,
+    phase: u8,
     on_play: Option<ClickHandler>,
+    on_title: Option<ClickHandler>,
+    on_artist: Option<ClickHandler>,
 }
 
 impl TrackRow {
@@ -38,7 +41,10 @@ impl TrackRow {
             cover: None,
             current: false,
             playing: false,
+            phase: 0,
             on_play: None,
+            on_title: None,
+            on_artist: None,
         }
     }
 
@@ -53,11 +59,32 @@ impl TrackRow {
         self
     }
 
+    pub fn animation_phase(mut self, phase: u8) -> Self {
+        self.phase = phase;
+        self
+    }
+
     pub fn on_play(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_play = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_title(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_title = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_artist(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_artist = Some(Box::new(handler));
         self
     }
 }
@@ -85,7 +112,14 @@ impl RenderOnce for TrackRow {
                 .into_any_element(),
         };
 
+        let group = SharedString::from(format!("track-row-{}-{}", self.index, self.title));
         let leading = if self.current {
+            let phase = self.phase as usize;
+            let heights = [
+                5.0 + ((phase + self.index) % 4) as f32 * 2.5,
+                13.0 - ((phase + self.index + 1) % 3) as f32 * 2.0,
+                8.0 + ((phase + self.index + 2) % 3) as f32 * 2.0,
+            ];
             gpui::div()
                 .w(px(22.0))
                 .h(px(16.0))
@@ -96,36 +130,57 @@ impl RenderOnce for TrackRow {
                 .child(
                     gpui::div()
                         .w(px(3.0))
-                        .h(px(7.0))
+                        .h(px(heights[0]))
                         .rounded_full()
                         .bg(theme.colors.accent),
                 )
                 .child(
                     gpui::div()
                         .w(px(3.0))
-                        .h(px(13.0))
+                        .h(px(heights[1]))
                         .rounded_full()
                         .bg(theme.colors.accent),
                 )
                 .child(
                     gpui::div()
                         .w(px(3.0))
-                        .h(if self.playing { px(10.0) } else { px(5.0) })
+                        .h(px(heights[2]))
                         .rounded_full()
                         .bg(theme.colors.accent),
                 )
                 .into_any_element()
         } else {
             gpui::div()
+                .relative()
                 .w(px(22.0))
-                .text_size(px(text::SM))
-                .text_color(theme.colors.text_muted)
-                .child(format!("{}", self.index))
+                .h(px(16.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    gpui::div()
+                        .text_size(px(text::SM))
+                        .text_color(theme.colors.text_muted)
+                        .group_hover(group.clone(), |style| style.opacity(0.0))
+                        .child(format!("{}", self.index)),
+                )
+                .child(
+                    gpui::div()
+                        .absolute()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size_full()
+                        .opacity(0.0)
+                        .group_hover(group.clone(), |style| style.opacity(1.0))
+                        .child(Icon::new(icons::PLAY).size(13.0).color(theme.colors.accent)),
+                )
                 .into_any_element()
         };
 
         let mut row = gpui::div()
             .id(self.id)
+            .group(group)
             .flex()
             .items_center()
             .gap(px(space::MD))
@@ -159,8 +214,13 @@ impl RenderOnce for TrackRow {
                     .flex_1()
                     .min_w(px(0.0))
                     .gap(px(1.0))
-                    .child(
-                        gpui::div()
+                    .child({
+                        let mut title = gpui::div()
+                            .id(ElementId::Name(SharedString::from(format!(
+                                "track-title-{}-{}",
+                                self.index, self.title
+                            ))))
+                            .cursor_pointer()
                             .text_size(px(text::BASE))
                             .font_weight(if self.current {
                                 FontWeight::SEMIBOLD
@@ -175,17 +235,38 @@ impl RenderOnce for TrackRow {
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(self.title),
-                    )
-                    .child(
-                        gpui::div()
+                            .hover(|style| style.text_color(theme.colors.accent))
+                            .child(self.title);
+                        if let Some(handler) = self.on_title {
+                            title = title.on_click(move |event, window, cx| {
+                                cx.stop_propagation();
+                                handler(event, window, cx);
+                            });
+                        }
+                        title
+                    })
+                    .child({
+                        let mut artist = gpui::div()
+                            .id(ElementId::Name(SharedString::from(format!(
+                                "track-artist-{}-{}",
+                                self.index, self.artist
+                            ))))
+                            .cursor_pointer()
                             .text_size(px(text::SM))
                             .text_color(theme.colors.text_muted)
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(self.artist),
-                    ),
+                            .hover(|style| style.text_color(theme.colors.accent))
+                            .child(self.artist);
+                        if let Some(handler) = self.on_artist {
+                            artist = artist.on_click(move |event, window, cx| {
+                                cx.stop_propagation();
+                                handler(event, window, cx);
+                            });
+                        }
+                        artist
+                    }),
             )
             .child(
                 gpui::div()
@@ -195,10 +276,5 @@ impl RenderOnce for TrackRow {
                     .text_right()
                     .child(self.duration),
             )
-            .child(Icon::new(icons::PLAY).size(14.0).color(if self.current {
-                theme.colors.accent
-            } else {
-                theme.colors.text_muted
-            }))
     }
 }

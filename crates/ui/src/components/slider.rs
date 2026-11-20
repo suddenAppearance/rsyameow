@@ -1,11 +1,11 @@
 use crate::theme::Theme;
 use gpui::{
-    App, Bounds, IntoElement, MouseButton, MouseDownEvent, RenderOnce, Window, canvas, prelude::*,
-    px, relative,
+    App, Bounds, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, RenderOnce, Window,
+    canvas, prelude::*, px, relative,
 };
 use std::sync::{Arc, Mutex};
 
-type ChangeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
+type ChangeHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 
 /// A compact click-to-set horizontal slider with a `0.0..=1.0` value.
 ///
@@ -33,7 +33,7 @@ impl Slider {
     }
 
     pub fn on_change(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
-        self.on_change = Some(Box::new(handler));
+        self.on_change = Some(Arc::new(handler));
         self
     }
 }
@@ -44,8 +44,11 @@ impl RenderOnce for Slider {
         let value = self.value.clamp(0.0, 1.0);
         let track_bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
         let bounds_for_canvas = track_bounds.clone();
-        let bounds_for_click = track_bounds;
+        let bounds_for_down = track_bounds.clone();
+        let bounds_for_move = track_bounds;
         let handler = self.on_change;
+        let handler_for_down = handler.clone();
+        let handler_for_move = handler;
 
         gpui::div()
             .relative()
@@ -57,10 +60,10 @@ impl RenderOnce for Slider {
             .on_mouse_down(
                 MouseButton::Left,
                 move |event: &MouseDownEvent, window, cx| {
-                    let Some(handler) = handler.as_ref() else {
+                    let Some(handler) = handler_for_down.as_ref() else {
                         return;
                     };
-                    let Ok(bounds) = bounds_for_click.lock() else {
+                    let Ok(bounds) = bounds_for_down.lock() else {
                         return;
                     };
                     let Some(bounds) = bounds.as_ref() else {
@@ -76,6 +79,27 @@ impl RenderOnce for Slider {
                     handler(value, window, cx);
                 },
             )
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                if !event.dragging() {
+                    return;
+                }
+                let Some(handler) = handler_for_move.as_ref() else {
+                    return;
+                };
+                let Ok(bounds) = bounds_for_move.lock() else {
+                    return;
+                };
+                let Some(bounds) = bounds.as_ref() else {
+                    return;
+                };
+                let width = f32::from(bounds.size.width);
+                if width <= 0.0 {
+                    return;
+                }
+                let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
+                    .clamp(0.0, 1.0);
+                handler(value, window, cx);
+            })
             .child(
                 gpui::div()
                     .w_full()

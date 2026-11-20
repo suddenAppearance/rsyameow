@@ -1,6 +1,6 @@
 //! Demo data used by `--demo` to preview the UI without a Yandex account.
 
-use gpui::Image;
+use gpui::{Image, Rgba};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -213,6 +213,36 @@ pub fn liked(tracks: &[Track]) -> Vec<TrackShort> {
 }
 
 /// Generate abstract gradient artwork for every demo track.
+/// A gradient palette matching the generated demo cover for the given index.
+pub fn cover_palette(index: usize) -> (Rgba, Rgba) {
+    let palettes: [(u32, u32); 7] = [
+        (0x2A1B3D, 0xF7B267),
+        (0x0B3D2E, 0x9AD1D4),
+        (0x3D0C11, 0xF2C078),
+        (0x102A43, 0xFFDB4D),
+        (0x2B2D42, 0xEF8354),
+        (0x1C2541, 0x5BC0BE),
+        (0x3A0CA3, 0xF72585),
+    ];
+    let (start, end) = palettes[index % palettes.len()];
+    let start = rgb_components(start);
+    let end = rgb_components(end);
+    (
+        Rgba {
+            r: start[0] / 255.0 * 0.38,
+            g: start[1] / 255.0 * 0.38,
+            b: start[2] / 255.0 * 0.38,
+            a: 1.0,
+        },
+        Rgba {
+            r: end[0] / 255.0,
+            g: end[1] / 255.0,
+            b: end[2] / 255.0,
+            a: 1.0,
+        },
+    )
+}
+
 pub fn covers(tracks: &[Track]) -> HashMap<String, Arc<Image>> {
     let palettes: [(u32, u32); 7] = [
         (0x2A1B3D, 0xF7B267),

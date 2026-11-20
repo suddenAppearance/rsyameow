@@ -53,6 +53,8 @@ pub struct AppState {
     #[serde(default)]
     pub track_id: Option<String>,
     #[serde(default)]
+    pub page_track_id: Option<String>,
+    #[serde(default)]
     pub position_ms: u64,
     #[serde(default)]
     pub quality: Option<String>,

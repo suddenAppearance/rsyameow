@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Slider, Spinner};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-type SeekHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
+type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 type VolumeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 
 /// The persistent playback bar at the bottom of the window.
@@ -198,7 +198,7 @@ impl PlayerBar {
     }
 
     pub fn on_seek(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
-        self.on_seek = Some(Box::new(handler));
+        self.on_seek = Some(Arc::new(handler));
         self
     }
 }
@@ -520,8 +520,11 @@ impl RenderOnce for PlayerBar {
 fn seek_area(progress: f32, on_seek: Option<SeekHandler>) -> gpui::Div {
     let bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
     let bounds_for_canvas = bounds.clone();
-    let bounds_for_click = bounds;
+    let bounds_for_down = bounds.clone();
+    let bounds_for_move = bounds;
     let handler = on_seek;
+    let handler_for_down = handler.clone();
+    let handler_for_move = handler;
 
     gpui::div()
         .relative()
@@ -533,17 +536,15 @@ fn seek_area(progress: f32, on_seek: Option<SeekHandler>) -> gpui::Div {
         .on_mouse_down(
             MouseButton::Left,
             move |event: &MouseDownEvent, window, cx| {
-                let Some(handler) = handler.as_ref() else {
+                let Some(handler) = handler_for_down.as_ref() else {
                     return;
                 };
-                let Ok(bounds) = bounds_for_click.lock() else {
+                let Ok(bounds) = bounds_for_down.lock() else {
                     return;
                 };
                 let Some(bounds) = bounds.as_ref() else {
-                    eprintln!("seek: no bounds yet");
                     return;
                 };
-                eprintln!("seek: click={:?} bounds={:?}", event.position, bounds);
                 let width = f32::from(bounds.size.width);
                 if width <= 0.0 {
                     return;
@@ -553,6 +554,27 @@ fn seek_area(progress: f32, on_seek: Option<SeekHandler>) -> gpui::Div {
                 handler(fraction, window, cx);
             },
         )
+        .on_mouse_move(move |event: &gpui::MouseMoveEvent, window, cx| {
+            if !event.dragging() {
+                return;
+            }
+            let Some(handler) = handler_for_move.as_ref() else {
+                return;
+            };
+            let Ok(bounds) = bounds_for_move.lock() else {
+                return;
+            };
+            let Some(bounds) = bounds.as_ref() else {
+                return;
+            };
+            let width = f32::from(bounds.size.width);
+            if width <= 0.0 {
+                return;
+            }
+            let fraction = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
+                .clamp(0.0, 1.0);
+            handler(fraction, window, cx);
+        })
         .child(ProgressBar::new(progress).height(4.0))
         .child(
             canvas(
