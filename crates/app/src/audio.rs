@@ -134,10 +134,15 @@ impl AudioEngine {
         let decoder = Decoder::try_from(Cursor::new(bytes))
             .map_err(|error| format!("не удалось декодировать аудио: {error}"))?;
         backend.player.append(decoder);
-        backend
-            .player
-            .try_seek(position)
-            .map_err(|error| format!("не удалось перемотать трек: {error}"))?;
+        // A freshly appended decoder is already at the start. Asking
+        // Symphonia for a zero-position seek can still return an error even
+        // though playback is correctly rewound, so skip that redundant seek.
+        if !position.is_zero() {
+            backend
+                .player
+                .try_seek(position)
+                .map_err(|error| format!("не удалось перемотать трек: {error}"))?;
+        }
         if paused {
             backend.player.pause();
         } else {
