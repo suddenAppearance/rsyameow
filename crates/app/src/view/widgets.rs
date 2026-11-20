@@ -306,8 +306,8 @@ pub(crate) fn brand(theme: &Theme, large: bool) -> Div {
                 .items_center()
                 .justify_center()
                 .child(
-                    Icon::new(icons::MUSIC)
-                        .size(mark_size * 0.5)
+                    Icon::new(icons::PAW)
+                        .size(mark_size * 0.58)
                         .color(theme.colors.accent_text),
                 ),
         )
@@ -321,7 +321,7 @@ pub(crate) fn brand(theme: &Theme, large: bool) -> Div {
                         .text_size(px(title_size))
                         .font_weight(gpui::FontWeight::BOLD)
                         .line_height(px(title_size + 2.0))
-                        .child("rsyameow"),
+                        .child("Я.Мяу"),
                 )
                 .child(
                     div()

@@ -15,7 +15,7 @@ pub fn status() -> Status {
         account: Some(Account {
             now: Some("2026-11-20T00:00:00".into()),
             uid: Some(100042),
-            login: Some("demo@rsyameow".into()),
+            login: Some("demo@ya.myau".into()),
             full_name: Some("Демид Кот".into()),
             first_name: Some("Демид".into()),
             display_name: Some("Демид Кот".into()),
@@ -40,7 +40,7 @@ pub fn status() -> Status {
             can_start_trial: Some(false),
             ..Default::default()
         }),
-        default_email: Some("demo@rsyameow".into()),
+        default_email: Some("demo@ya.myau".into()),
         station_exists: Some(true),
         pretrial_active: Some(false),
         ..Default::default()
@@ -163,7 +163,7 @@ fn make_playlist(
         og_image: None,
         owner: Some(User {
             uid: Some(100042),
-            login: Some("demo@rsyameow".into()),
+            login: Some("demo@ya.myau".into()),
             display_name: Some("Демид Кот".into()),
             full_name: Some("Демид Кот".into()),
         }),

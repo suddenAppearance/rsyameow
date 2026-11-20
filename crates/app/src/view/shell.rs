@@ -505,8 +505,8 @@ pub(crate) fn title_bar(screen: &Screen, window: &mut Window, theme: &Theme) -> 
                 .items_center()
                 .justify_center()
                 .child(
-                    Icon::new(icons::MUSIC)
-                        .size(9.0)
+                    Icon::new(icons::PAW)
+                        .size(10.0)
                         .color(theme.colors.accent_text),
                 ),
         )
@@ -522,7 +522,7 @@ pub(crate) fn title_bar(screen: &Screen, window: &mut Window, theme: &Theme) -> 
                         .text_size(px(text::SM))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(theme.colors.text)
-                        .child("rsyameow"),
+                        .child("Я.Мяу"),
                 )
                 .child(
                     div()

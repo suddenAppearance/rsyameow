@@ -146,7 +146,7 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(960.0), px(640.0))),
                 titlebar: Some(gpui::TitlebarOptions {
-                    title: Some(SharedString::from("rsyameow — Яндекс Музыка")),
+                    title: Some(SharedString::from("Я.Мяу — Яндекс Музыка")),
                     appears_transparent: true,
                     ..Default::default()
                 }),
