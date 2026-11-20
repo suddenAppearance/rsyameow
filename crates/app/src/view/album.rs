@@ -21,6 +21,11 @@ impl RootView {
         let cover = album_id.and_then(|id| self.search_images.get(&format!("album-{id}")).cloned());
         let current_id = self.player.track.as_ref().map(|track| track.id.clone());
         let playing = self.player.playing;
+        let album_liked = album_id.is_some_and(|id| {
+            self.profile
+                .as_ref()
+                .is_some_and(|profile| profile.liked_album_ids.contains(&id))
+        });
 
         let title = album
             .as_ref()
@@ -84,6 +89,29 @@ impl RootView {
                                     this.play_context_all(tracks.clone(), true, cx);
                                 }
                             })),
+                    )
+                    .child(
+                        IconButton::new(
+                            "album-like",
+                            if album_liked {
+                                icons::HEART
+                            } else {
+                                icons::HEART_OUTLINE
+                            },
+                        )
+                        .size(38.0)
+                        .icon_size(17.0)
+                        .variant(if album_liked {
+                            ButtonVariant::Soft
+                        } else {
+                            ButtonVariant::Secondary
+                        })
+                        .disabled(self.album_like_busy)
+                        .on_click(cx.listener(
+                            |this, _: &gpui::ClickEvent, _, cx| {
+                                this.toggle_album_like(cx);
+                            },
+                        )),
                     ),
             );
 

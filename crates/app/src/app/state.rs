@@ -16,6 +16,7 @@ impl RootView {
             Screen::Track => "track",
             Screen::NowPlaying => "now_playing",
             Screen::Wave => "wave",
+            Screen::Settings => "settings",
         }
     }
 
@@ -152,6 +153,7 @@ impl RootView {
             "track" => Screen::Track,
             "now_playing" => Screen::NowPlaying,
             "wave" => Screen::Wave,
+            "settings" => Screen::Settings,
             _ => Screen::Profile,
         };
         if self.screen == Screen::Track && state.track_id.is_none() && state.page_track_id.is_none()

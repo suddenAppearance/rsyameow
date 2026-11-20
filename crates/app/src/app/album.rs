@@ -26,6 +26,74 @@ impl RootView {
         cx.notify();
     }
 
+    pub(crate) fn toggle_album_like(&mut self, cx: &mut Context<Self>) {
+        let Some(album_id) = self.album.id else {
+            return;
+        };
+        if self.album_like_busy {
+            return;
+        }
+        let Some(profile) = self.profile.as_ref() else {
+            return;
+        };
+        let liked = profile.liked_album_ids.contains(&album_id);
+
+        if self.demo {
+            if let Some(profile) = self.profile.as_mut() {
+                if liked {
+                    profile.liked_album_ids.remove(&album_id);
+                } else {
+                    profile.liked_album_ids.insert(album_id);
+                }
+            }
+            if liked {
+                self.albums.items.retain(|album| album.id != Some(album_id));
+            }
+            cx.notify();
+            return;
+        }
+
+        self.album_like_busy = true;
+        self.album.error = None;
+        let client = self.client.clone();
+        let epoch = self.profile_epoch;
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.like_albums(&[album_id], !liked) })
+                .await;
+            this.update(cx, |this, cx| {
+                if this.profile_epoch != epoch {
+                    return;
+                }
+                this.album_like_busy = false;
+                match result {
+                    Ok(()) => {
+                        if let Some(profile) = this.profile.as_mut() {
+                            if liked {
+                                profile.liked_album_ids.remove(&album_id);
+                            } else {
+                                profile.liked_album_ids.insert(album_id);
+                            }
+                        }
+                        if liked {
+                            this.albums.items.retain(|album| album.id != Some(album_id));
+                        } else if let Some(album) = this.album.album.clone()
+                            && !this.albums.items.iter().any(|item| item.id == album.id)
+                        {
+                            this.albums.items.insert(0, album);
+                        }
+                    }
+                    Err(error) => this.album.error = Some(error_text(&error)),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn load_album_data(
         &mut self,
         album_id: u64,

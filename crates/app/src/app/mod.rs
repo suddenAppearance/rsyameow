@@ -6,6 +6,7 @@ mod auth;
 mod cover_art;
 mod demo_mode;
 mod likes;
+mod media;
 mod navigation;
 mod playback;
 mod playlists;
@@ -17,6 +18,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 mod track;
+mod tray;
 mod wave;
 
 pub(crate) use cover_art::{cover_palette, decode_image, default_palette, error_text};
@@ -26,8 +28,8 @@ pub(crate) use presentation::{plan_name, plus_until, registered_year};
 use crate::audio::AudioEngine;
 use crate::{config, demo, format};
 use gpui::{
-    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Hsla, Image, Rgba, ScrollHandle,
-    Subscription, Task, Timer, WeakEntity, actions, prelude::*,
+    AnyWindowHandle, ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Hsla, Image,
+    Rgba, ScrollHandle, Subscription, Task, Timer, WeakEntity, actions, prelude::*,
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
@@ -71,6 +73,7 @@ pub(crate) enum Screen {
     Track,
     NowPlaying,
     Wave,
+    Settings,
     LoadError(String),
 }
 
@@ -208,6 +211,7 @@ pub(crate) struct SearchState {
 pub(crate) struct ProfileData {
     pub(crate) status: Status,
     pub(crate) liked: Vec<TrackShort>,
+    pub(crate) liked_album_ids: HashSet<u64>,
     pub(crate) total_liked: usize,
     pub(crate) sample: Vec<Track>,
 }
@@ -300,11 +304,14 @@ pub struct RootView {
     pub(crate) queue_track_cache: HashMap<String, Track>,
     queue_fetching: bool,
     pub(crate) volume: f32,
+    pub(crate) audio_quality: yandex_music::AudioQuality,
+    pub(crate) equalizer: config::EqualizerPreset,
     previous_volume: f32,
     pub(crate) like_busy: bool,
     pub(crate) liked_reloading: bool,
     pub(crate) liked_loading_more: bool,
     pub(crate) liked_exhausted: bool,
+    pub(crate) album_like_busy: bool,
     pub(crate) liked_error: Option<String>,
     pub(crate) liked_scroll: ScrollHandle,
     pub(crate) playlist_scroll: ScrollHandle,
@@ -314,6 +321,14 @@ pub struct RootView {
     window_size_epoch: u64,
     state_save_epoch: u64,
     pub(crate) focus_handle: FocusHandle,
+    pub(crate) window_handle: AnyWindowHandle,
+    pub(crate) tray_handle: Option<ksni::blocking::Handle<tray::AppTray>>,
+    tray_events: std::sync::mpsc::Receiver<tray::TrayEvent>,
+    media_controls: Option<souvlaki::MediaControls>,
+    media_events: std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>,
+    media_track_key: Option<String>,
+    media_playing: Option<bool>,
+    media_volume: Option<f32>,
     _token_subscription: Subscription,
     _search_subscription: Subscription,
     _ticker: Task<()>,
@@ -357,10 +372,26 @@ impl RootView {
 
         let ticker = Self::spawn_ticker(cx);
         let focus_handle = cx.focus_handle();
+        let window_handle = window.window_handle();
+        let (media_controls, media_events) = media::init_media_controls();
+        let (tray_handle, tray_events) = tray::spawn_tray();
+        let tray_available = tray_handle.is_some();
+        window.on_window_should_close(cx, move |window, _| {
+            if tray_available {
+                window.minimize_window();
+                false
+            } else {
+                true
+            }
+        });
         let viewport = window.viewport_size();
-        let volume = config::load_volume().unwrap_or(0.85);
+        let playback_settings = config::load_playback_settings();
+        let volume = playback_settings.volume;
+        let audio_quality = playback_settings.quality;
+        let equalizer = playback_settings.equalizer;
         let mut audio = AudioEngine::new();
         audio.set_volume(volume);
+        audio.set_equalizer(equalizer);
 
         let mut view = Self {
             screen: Screen::Login,
@@ -413,11 +444,14 @@ impl RootView {
             queue_track_cache: HashMap::new(),
             queue_fetching: false,
             volume,
+            audio_quality,
+            equalizer,
             previous_volume: if volume > 0.0 { volume } else { 0.85 },
             like_busy: false,
             liked_reloading: false,
             liked_loading_more: false,
             liked_exhausted: false,
+            album_like_busy: false,
             liked_error: None,
             liked_scroll: ScrollHandle::new(),
             playlist_scroll: ScrollHandle::new(),
@@ -427,6 +461,14 @@ impl RootView {
             window_size_epoch: 0,
             state_save_epoch: 0,
             focus_handle,
+            window_handle,
+            tray_handle,
+            tray_events,
+            media_controls,
+            media_events,
+            media_track_key: None,
+            media_playing: None,
+            media_volume: None,
             _token_subscription: token_subscription,
             _search_subscription: search_subscription,
             _ticker: ticker,
@@ -477,6 +519,27 @@ impl RootView {
                     );
                     if !immersive && this.player.playing && tick.is_multiple_of(6) {
                         this.animation_phase = this.animation_phase.wrapping_add(1);
+                    }
+
+                    while let Ok(event) = this.tray_events.try_recv() {
+                        match event {
+                            tray::TrayEvent::Show => {
+                                let _ = this.window_handle.update(cx, |_, window, _| {
+                                    window.activate_window();
+                                });
+                            }
+                            tray::TrayEvent::Quit => {
+                                let _ = this.window_handle.update(cx, |_, window, _| {
+                                    window.remove_window();
+                                });
+                            }
+                        }
+                    }
+                    while let Ok(event) = this.media_events.try_recv() {
+                        this.handle_media_event(event, cx);
+                    }
+                    if tick.is_multiple_of(30) {
+                        this.sync_media_controls();
                     }
 
                     let liked_more = this

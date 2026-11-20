@@ -4,8 +4,8 @@ use crate::auth::{
     DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DEFAULT_DEVICE_NAME, DeviceCode, OAuthToken,
 };
 use crate::download::{
-    DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FileInfo, build_direct_link,
-    file_info_sign, lyrics_sign, select_best_mp3,
+    AudioQuality, DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FileInfo,
+    build_direct_link, file_info_sign, lyrics_sign, select_best_mp3, select_mp3,
 };
 use crate::http::Transport;
 use crate::models::{
@@ -544,6 +544,39 @@ impl Client {
         Ok(albums.unwrap_or_default())
     }
 
+    /// Like or unlike albums in the current account's collection.
+    pub fn like_albums(&self, album_ids: &[u64], liked: bool) -> Result<()> {
+        if album_ids.is_empty() {
+            return Ok(());
+        }
+        let token = self.require_token()?;
+        let uid = self.require_uid()?;
+        let action = if liked { "add-multiple" } else { "remove" };
+        let url = self.api_url(&format!("/users/{uid}/likes/albums/{action}"));
+        let form: Vec<(&str, String)> = album_ids
+            .iter()
+            .map(|id| ("album-ids", id.to_string()))
+            .collect();
+        let _: serde_json::Value = self.inner.http.post_form(&url, &form, Some(&token))?;
+        Ok(())
+    }
+
+    /// Ids of albums saved in the current account's collection.
+    pub fn liked_album_ids(&self) -> Result<Vec<u64>> {
+        let token = self.require_token()?;
+        let uid = match self.cached_uid() {
+            Some(uid) => uid,
+            None => self
+                .init()?
+                .account
+                .and_then(|account| account.uid)
+                .ok_or(Error::Decode("account status contains no uid".into()))?,
+        };
+        let url = self.api_url(&format!("/users/{uid}/likes/albums"));
+        let liked: Vec<LikedAlbum> = self.inner.http.get(&url, &[], Some(&token))?;
+        Ok(liked.into_iter().map(|album| album.id).collect())
+    }
+
     // ------------------------------------------------------------------- Wave
 
     /// A batch of tracks from a rotor station. `queue` is the id of the last
@@ -663,12 +696,25 @@ impl Client {
     /// Tries the signed lossless endpoint first (FLAC when the account and
     /// track support it), then falls back to the legacy MP3 variants.
     pub fn download_track(&self, track_id: &str) -> Result<DownloadedTrack> {
-        if let Ok(downloaded) = self.download_lossless(track_id) {
+        self.download_track_with_quality(track_id, AudioQuality::Lossless)
+    }
+
+    /// Download a track using the requested quality preference.
+    pub fn download_track_with_quality(
+        &self,
+        track_id: &str,
+        quality: AudioQuality,
+    ) -> Result<DownloadedTrack> {
+        if quality == AudioQuality::Lossless
+            && let Ok(downloaded) = self.download_lossless(track_id)
+        {
             return Ok(downloaded);
         }
 
         let infos = self.download_info(track_id)?;
-        let info = select_best_mp3(&infos).ok_or(Error::NoDownload)?.clone();
+        let info = select_mp3(&infos, quality)
+            .ok_or(Error::NoDownload)?
+            .clone();
         let token = self.require_token()?;
         let xml = self
             .inner

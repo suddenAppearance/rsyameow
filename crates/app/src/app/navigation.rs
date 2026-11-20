@@ -41,6 +41,17 @@ impl RootView {
         cx.notify();
     }
 
+    pub(crate) fn open_settings(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.screen = Screen::Settings;
+        self.nav_stack.clear();
+        self.queue_open = false;
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
     pub(crate) fn open_now_playing(&mut self, cx: &mut Context<Self>) {
         if matches!(self.screen, Screen::Login | Screen::Loading) {
             return;

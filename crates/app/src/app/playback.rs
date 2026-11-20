@@ -239,6 +239,7 @@ impl RootView {
         self.playback_epoch += 1;
         let epoch = self.playback_epoch;
         let client = self.client.clone();
+        let audio_quality = self.audio_quality;
         let known = track.clone();
         let cache_id = track
             .as_ref()
@@ -277,7 +278,7 @@ impl RootView {
                     };
                     let downloaded = match cached_audio {
                         Some(downloaded) => downloaded,
-                        None => client.download_track(&track.id)?,
+                        None => client.download_track_with_quality(&track.id, audio_quality)?,
                     };
                     let cover = if have_cover {
                         None
@@ -382,6 +383,38 @@ impl RootView {
             self.set_volume(0.0, cx);
         } else {
             self.set_volume(self.previous_volume.max(0.2), cx);
+        }
+    }
+
+    pub(crate) fn set_audio_quality(
+        &mut self,
+        quality: yandex_music::AudioQuality,
+        cx: &mut Context<Self>,
+    ) {
+        self.audio_quality = quality;
+        self.save_playback_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_equalizer(
+        &mut self,
+        equalizer: config::EqualizerPreset,
+        cx: &mut Context<Self>,
+    ) {
+        self.equalizer = equalizer;
+        self.audio.set_equalizer(equalizer);
+        self.save_playback_settings();
+        cx.notify();
+    }
+
+    fn save_playback_settings(&self) {
+        let settings = config::PlaybackSettings {
+            volume: self.volume,
+            quality: self.audio_quality,
+            equalizer: self.equalizer,
+        };
+        if let Err(error) = config::save_playback_settings(&settings) {
+            eprintln!("failed to save playback settings: {error}");
         }
     }
 

@@ -20,6 +20,7 @@ impl RootView {
         self.queue_track_cache.clear();
         self.queue_fetching = false;
         self.like_busy = false;
+        self.album_like_busy = false;
         self.liked_reloading = false;
         self.liked_loading_more = false;
         self.liked_exhausted = false;
@@ -53,9 +54,14 @@ impl RootView {
             self.track_palettes
                 .insert(track.id.clone(), demo::cover_palette(index));
         }
+        let liked_album_ids = demo::albums()
+            .into_iter()
+            .filter_map(|album| album.id)
+            .collect();
         self.profile = Some(ProfileData {
             status: demo::status(),
             liked: demo::liked(&tracks),
+            liked_album_ids,
             total_liked: 248,
             sample: tracks,
         });

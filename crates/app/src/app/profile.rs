@@ -17,6 +17,7 @@ impl RootView {
         self.queue_track_cache.clear();
         self.queue_fetching = false;
         self.like_busy = false;
+        self.album_like_busy = false;
         self.liked_reloading = false;
         self.liked_loading_more = false;
         self.liked_exhausted = false;
@@ -47,6 +48,7 @@ impl RootView {
                 .background_spawn(async move {
                     let status = client.init()?;
                     let liked = client.liked_tracks()?;
+                    let liked_album_ids = client.liked_album_ids().unwrap_or_default();
                     let ids: Vec<String> = liked
                         .tracks
                         .iter()
@@ -61,6 +63,7 @@ impl RootView {
                     Ok::<_, MusicError>(ProfileData {
                         total_liked: liked.tracks.len(),
                         liked: liked.tracks,
+                        liked_album_ids: liked_album_ids.into_iter().collect(),
                         sample,
                         status,
                     })

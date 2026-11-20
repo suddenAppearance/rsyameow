@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use yandex_music::AudioQuality;
 
 const CONFIG_DIR: &str = "rsyameow";
 const SESSION_FILE: &str = "session.json";
@@ -23,10 +24,63 @@ struct WindowSize {
     height: f32,
 }
 
-/// Playback preferences (currently only volume).
-#[derive(Debug, Serialize, Deserialize)]
-struct PlaybackSettings {
-    volume: f32,
+/// Equalizer presets available in the local settings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EqualizerPreset {
+    #[default]
+    Flat,
+    Bass,
+    Vocal,
+    Rock,
+    Electronic,
+}
+
+impl EqualizerPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flat => "Ровный",
+            Self::Bass => "Бас",
+            Self::Vocal => "Вокал",
+            Self::Rock => "Рок",
+            Self::Electronic => "Электроника",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Flat => "Без изменений",
+            Self::Bass => "Больше низких частот",
+            Self::Vocal => "Акцент на голосе",
+            Self::Rock => "Плотная середина и верх",
+            Self::Electronic => "Глубокий бас и воздух",
+        }
+    }
+}
+
+/// Playback preferences.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaybackSettings {
+    #[serde(default = "default_volume")]
+    pub volume: f32,
+    #[serde(default)]
+    pub quality: AudioQuality,
+    #[serde(default)]
+    pub equalizer: EqualizerPreset,
+}
+
+fn default_volume() -> f32 {
+    0.85
+}
+
+impl Default for PlaybackSettings {
+    fn default() -> Self {
+        Self {
+            volume: default_volume(),
+            quality: AudioQuality::Lossless,
+            equalizer: EqualizerPreset::Flat,
+        }
+    }
 }
 
 /// UI and playback state restored on the next launch.
@@ -148,32 +202,51 @@ pub fn save_window_size(width: f32, height: f32) -> io::Result<()> {
     fs::write(dir.join(WINDOW_FILE), data)
 }
 
-/// Load the saved player volume, clamped to `0.0..=1.0`.
-pub fn load_volume() -> Option<f32> {
-    let path = config_dir()?.join(PLAYBACK_FILE);
-    let data = fs::read_to_string(path).ok()?;
-    let settings: PlaybackSettings = serde_json::from_str(&data).ok()?;
+/// Load local playback settings, falling back to defaults.
+pub fn load_playback_settings() -> PlaybackSettings {
+    let Some(path) = config_dir().map(|dir| dir.join(PLAYBACK_FILE)) else {
+        return PlaybackSettings::default();
+    };
+    let Ok(data) = fs::read_to_string(path) else {
+        return PlaybackSettings::default();
+    };
+    let Ok(mut settings) = serde_json::from_str::<PlaybackSettings>(&data) else {
+        return PlaybackSettings::default();
+    };
     if settings.volume.is_finite() {
-        Some(settings.volume.clamp(0.0, 1.0))
+        settings.volume = settings.volume.clamp(0.0, 1.0);
     } else {
-        None
+        settings.volume = default_volume();
     }
+    settings
 }
 
-/// Persist the player volume.
-pub fn save_volume(volume: f32) -> io::Result<()> {
-    if !volume.is_finite() {
+/// Load the saved player volume, clamped to `0.0..=1.0`.
+#[allow(dead_code)]
+pub fn load_volume() -> Option<f32> {
+    Some(load_playback_settings().volume)
+}
+
+/// Persist all local playback settings.
+pub fn save_playback_settings(settings: &PlaybackSettings) -> io::Result<()> {
+    if !settings.volume.is_finite() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid volume",
         ));
     }
     let dir = ensure_config_dir()?;
-    let data = serde_json::to_vec_pretty(&PlaybackSettings {
-        volume: volume.clamp(0.0, 1.0),
-    })
-    .map_err(io::Error::other)?;
+    let mut settings = settings.clone();
+    settings.volume = settings.volume.clamp(0.0, 1.0);
+    let data = serde_json::to_vec_pretty(&settings).map_err(io::Error::other)?;
     fs::write(dir.join(PLAYBACK_FILE), data)
+}
+
+/// Persist the player volume while preserving the other settings.
+pub fn save_volume(volume: f32) -> io::Result<()> {
+    let mut settings = load_playback_settings();
+    settings.volume = volume;
+    save_playback_settings(&settings)
 }
 
 /// Load the last saved UI/playback state. Missing or malformed files are ignored.

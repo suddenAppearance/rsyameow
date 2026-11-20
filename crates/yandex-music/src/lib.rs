@@ -68,9 +68,9 @@ mod models;
 pub use auth::{DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DeviceCode, OAuthToken};
 pub use client::{Client, ClientBuilder};
 pub use download::{
-    DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS, FILE_INFO_SIGN_KEY,
-    FileDownloadInfo, FileInfo, LYRICS_SIGN_KEY, SIGN_SALT, build_direct_link, file_info_sign,
-    file_info_sign_at, lyrics_sign, lyrics_sign_at,
+    AudioQuality, DownloadInfo, DownloadedTrack, FILE_INFO_CLIENT, FILE_INFO_CODECS,
+    FILE_INFO_SIGN_KEY, FileDownloadInfo, FileInfo, LYRICS_SIGN_KEY, SIGN_SALT, build_direct_link,
+    file_info_sign, file_info_sign_at, lyrics_sign, lyrics_sign_at,
 };
 pub use error::{Error, Result};
 pub use models::{

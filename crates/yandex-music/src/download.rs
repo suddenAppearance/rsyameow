@@ -208,6 +208,19 @@ pub fn file_info_sign(
     ))
 }
 
+/// Preferred audio quality for track downloads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioQuality {
+    /// FLAC when available, MP3 320 otherwise.
+    #[default]
+    Lossless,
+    /// MP3 320 kbps.
+    High,
+    /// Lower-bitrate MP3 for slower connections.
+    Normal,
+}
+
 /// A track downloaded into memory, ready to be handed to an audio decoder.
 #[derive(Debug, Clone)]
 pub struct DownloadedTrack {
@@ -237,6 +250,24 @@ pub fn build_direct_link(xml: &str) -> Result<String> {
     let sign = format!("{digest:x}");
 
     Ok(format!("https://{host}/get-mp3/{sign}/{ts}{path}"))
+}
+
+/// Pick an MP3 variant matching the requested quality.
+pub fn select_mp3(infos: &[DownloadInfo], quality: AudioQuality) -> Option<&DownloadInfo> {
+    let full = infos.iter().filter(|info| info.is_full_mp3());
+    match quality {
+        AudioQuality::Lossless | AudioQuality::High => full.max_by_key(|info| info.bitrate_in_kbps),
+        AudioQuality::Normal => full
+            .filter(|info| info.bitrate_in_kbps <= 192)
+            .max_by_key(|info| info.bitrate_in_kbps)
+            .or_else(|| {
+                infos
+                    .iter()
+                    .filter(|info| !info.preview)
+                    .min_by_key(|info| info.bitrate_in_kbps)
+            }),
+    }
+    .or_else(|| select_best_mp3(infos))
 }
 
 /// Select the best full MP3 variant, preferring the highest bitrate.

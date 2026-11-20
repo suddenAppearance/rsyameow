@@ -8,6 +8,7 @@ mod playlists;
 mod profile;
 mod queue;
 mod search;
+mod settings;
 mod shell;
 mod track;
 mod wave;
@@ -20,6 +21,7 @@ use crate::app::{
     SearchKind, ToggleMute, TogglePlayback, ToggleQueue, default_palette, plan_name, plus_until,
     registered_year,
 };
+use crate::config;
 use crate::format;
 use gpui::{
     AnyElement, BorderStyle, Bounds, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla,
@@ -33,6 +35,17 @@ use rsyameow_ui::{
 };
 use std::sync::Arc;
 use yandex_music::{Album, Playlist, Status, Track};
+
+impl RootView {
+    fn text_input_focused(&self, window: &Window, cx: &gpui::App) -> bool {
+        let focused = window.focused(cx);
+        let search = self.search_input.read(cx).focus_handle(cx);
+        let token = self.token_input.read(cx).focus_handle(cx);
+        focused
+            .as_ref()
+            .is_some_and(|handle| handle == &search || handle == &token)
+    }
+}
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -66,24 +79,27 @@ impl Render for RootView {
             Screen::Track => self.track_view(&theme, cx),
             Screen::NowPlaying => self.now_playing_view(&theme, cx),
             Screen::Wave => self.wave_view(&theme, cx),
+            Screen::Settings => self.settings_view(&theme, cx),
         };
-
-        let maximized = window.is_maximized();
-        let window_radius = if maximized { 0.0 } else { 14.0 };
 
         div()
             .relative()
             .size_full()
-            .rounded(px(window_radius))
-            .overflow_hidden()
-            .when(!maximized, |element| {
-                element.border_1().border_color(theme.colors.border)
-            })
             .flex()
             .flex_col()
             .track_focus(&self.focus_handle)
             .key_context("rsyameow")
             .on_action(cx.listener(|this, _: &TogglePlayback, _, cx| this.toggle_playback(cx)))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if event.is_held || event.keystroke.key != "space" {
+                    return;
+                }
+                if this.text_input_focused(window, cx) {
+                    return;
+                }
+                this.toggle_playback(cx);
+                cx.stop_propagation();
+            }))
             .on_action(cx.listener(|this, _: &NextTrack, _, cx| this.play_next(cx)))
             .on_action(cx.listener(|this, _: &PreviousTrack, _, cx| this.play_previous(cx)))
             .on_action(cx.listener(|this, _: &ToggleMute, _, cx| this.toggle_mute(cx)))
@@ -92,24 +108,19 @@ impl Render for RootView {
             .on_action(
                 cx.listener(|this, _: &FocusSearch, window, cx| this.open_search(window, cx)),
             )
-            .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                this.close_window(window, cx);
+            }))
             .bg(theme.colors.background)
             .text_color(theme.colors.text)
             .font_family(theme.fonts.ui.clone())
-            .child(
-                // Clip the client content separately from the outer rounded
-                // frame. This keeps child backgrounds, images and absolute
-                // decorations from painting over the window corners.
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .rounded(px(window_radius))
-                    .overflow_hidden()
-                    .child(title_bar(&screen, window, &theme))
-                    .child(div().flex_1().min_h(px(0.0)).child(content)),
-            )
+            .child(title_bar(
+                &screen,
+                window,
+                &theme,
+                self.tray_handle.is_some(),
+            ))
+            .child(div().flex_1().min_h(px(0.0)).child(content))
             .child(
                 resize_handle("resize-top", ResizeEdge::Top, CursorStyle::ResizeUpDown)
                     .absolute()

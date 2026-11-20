@@ -86,10 +86,13 @@ impl RootView {
         self.load_covers(vec![track.clone()], cx);
         let epoch = self.profile_epoch;
         let client = self.client.clone();
+        let audio_quality = self.audio_quality;
         let request_id = id.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
-                .background_spawn(async move { client.download_track(&request_id) })
+                .background_spawn(async move {
+                    client.download_track_with_quality(&request_id, audio_quality)
+                })
                 .await;
             this.update(cx, |this, _cx| {
                 this.prefetching.remove(&id);

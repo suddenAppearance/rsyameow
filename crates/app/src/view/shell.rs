@@ -55,6 +55,7 @@ impl RootView {
         let now_active = matches!(self.screen, Screen::NowPlaying);
         let search_active = matches!(self.screen, Screen::Search);
         let playlists_active = matches!(self.screen, Screen::Playlists | Screen::Playlist);
+        let settings_active = matches!(self.screen, Screen::Settings);
         let accent = theme.colors.accent;
         let secondary = theme.colors.text_secondary;
         let hover_bg = theme.colors.surface_hover;
@@ -238,6 +239,36 @@ impl RootView {
                 this.open_playlists(cx);
             }));
 
+        let nav_settings = div()
+            .id("nav-settings")
+            .flex()
+            .items_center()
+            .gap(px(space::MD))
+            .h(px(42.0))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
+            .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
+            .cursor_pointer()
+            .text_size(px(text::BASE))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .when(settings_active, |element| {
+                element.bg(theme.colors.accent_soft).text_color(accent)
+            })
+            .when(!settings_active, |element| {
+                element
+                    .text_color(secondary)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(
+                Icon::new(icons::SETTINGS)
+                    .size(17.0)
+                    .color(if settings_active { accent } else { secondary }),
+            )
+            .when(!collapsed, |element| element.child("Настройки"))
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.open_settings(cx);
+            }));
+
         let profile_zone = div()
             .id("account-profile")
             .flex()
@@ -380,7 +411,8 @@ impl RootView {
                     .child(nav_wave)
                     .child(nav_now)
                     .child(nav_search)
-                    .child(nav_playlists),
+                    .child(nav_playlists)
+                    .child(nav_settings),
             )
             .child(div().flex_1())
             .child(
@@ -398,7 +430,7 @@ impl RootView {
                                 .justify_between()
                                 .text_size(px(10.0))
                                 .text_color(theme.colors.text_muted)
-                                .child("rsyameow 0.1.0")
+                                .child(format!("rsyameow {}", env!("CARGO_PKG_VERSION")))
                                 .child("gpui"),
                         )
                     }),
@@ -565,12 +597,18 @@ pub(crate) fn screen_title(screen: &Screen) -> &'static str {
         Screen::Track => "Трек",
         Screen::NowPlaying => "Сейчас играет",
         Screen::Wave => "Моя волна",
+        Screen::Settings => "Настройки",
         Screen::LoadError(_) => "Ошибка",
     }
 }
 
 /// A slim client-side titlebar with a draggable area and window controls.
-pub(crate) fn title_bar(screen: &Screen, window: &mut Window, theme: &Theme) -> AnyElement {
+pub(crate) fn title_bar(
+    screen: &Screen,
+    window: &mut Window,
+    theme: &Theme,
+    tray_available: bool,
+) -> AnyElement {
     let maximized = window.is_maximized();
 
     let controls = div()
@@ -600,7 +638,13 @@ pub(crate) fn title_bar(screen: &Screen, window: &mut Window, theme: &Theme) -> 
             icons::CLOSE,
             theme.colors.white,
             theme.colors.danger,
-            |_, window, _| window.remove_window(),
+            move |_, window, _| {
+                if tray_available {
+                    window.minimize_window();
+                } else {
+                    window.remove_window();
+                }
+            },
         ));
 
     div()
