@@ -8,10 +8,13 @@ mod demo;
 mod format;
 mod view;
 
-use app::RootView;
+use app::{
+    FocusSearch, NextTrack, PreviousTrack, RootView, ToggleMute, TogglePlayback, ToggleQueue,
+};
 use assets::Assets;
 use gpui::{
-    App, AppContext as _, Application, Bounds, SharedString, WindowBounds, WindowOptions, px, size,
+    App, AppContext as _, Application, Bounds, KeyBinding, SharedString, WindowBounds,
+    WindowOptions, px, size,
 };
 use rsyameow_ui::Theme;
 
@@ -101,6 +104,15 @@ fn main() {
         .with_assets(Assets)
         .run(move |cx: &mut App| {
             Theme::dark().install(cx);
+
+            cx.bind_keys([
+                KeyBinding::new("ctrl-space", TogglePlayback, Some("rsyameow")),
+                KeyBinding::new("ctrl-right", NextTrack, Some("rsyameow")),
+                KeyBinding::new("ctrl-left", PreviousTrack, Some("rsyameow")),
+                KeyBinding::new("ctrl-m", ToggleMute, Some("rsyameow")),
+                KeyBinding::new("ctrl-q", ToggleQueue, Some("rsyameow")),
+                KeyBinding::new("ctrl-f", FocusSearch, Some("rsyameow")),
+            ]);
 
             cx.on_window_closed(|cx| {
                 if cx.windows().is_empty() {

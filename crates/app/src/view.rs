@@ -1,6 +1,9 @@
 //! Rendering for [`RootView`].
 
-use crate::app::{RootView, Screen, SearchKind, plan_name, plus_until, registered_year};
+use crate::app::{
+    FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind, ToggleMute,
+    TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
+};
 use crate::format;
 use gpui::{
     AnyElement, Context, Div, ElementId, Focusable as _, Image, ImageSource, IntoElement,
@@ -42,6 +45,16 @@ impl Render for RootView {
             .size_full()
             .flex()
             .flex_col()
+            .track_focus(&self.focus_handle)
+            .key_context("rsyameow")
+            .on_action(cx.listener(|this, _: &TogglePlayback, _, cx| this.toggle_playback(cx)))
+            .on_action(cx.listener(|this, _: &NextTrack, _, cx| this.play_next(cx)))
+            .on_action(cx.listener(|this, _: &PreviousTrack, _, cx| this.play_previous(cx)))
+            .on_action(cx.listener(|this, _: &ToggleMute, _, cx| this.toggle_mute(cx)))
+            .on_action(cx.listener(|this, _: &ToggleQueue, _, cx| this.toggle_queue(cx)))
+            .on_action(
+                cx.listener(|this, _: &FocusSearch, window, cx| this.open_search(window, cx)),
+            )
             .bg(theme.colors.background)
             .text_color(theme.colors.text)
             .font_family(theme.fonts.ui.clone())

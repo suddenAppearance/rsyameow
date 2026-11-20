@@ -3,14 +3,26 @@
 use crate::audio::AudioEngine;
 use crate::{config, demo, format};
 use gpui::{
-    ClipboardItem, Context, Entity, Focusable as _, Image, Subscription, Task, Timer, WeakEntity,
-    prelude::*,
+    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Image, Subscription, Task, Timer,
+    WeakEntity, actions, prelude::*,
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+actions!(
+    rsyameow,
+    [
+        TogglePlayback,
+        NextTrack,
+        PreviousTrack,
+        ToggleMute,
+        ToggleQueue,
+        FocusSearch
+    ]
+);
+
 use yandex_music::{
     Album, Artist, Client, DeviceCode, Error as MusicError, Playlist, Status, Track, TrackShort,
 };
@@ -148,6 +160,7 @@ pub struct RootView {
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
+    pub(crate) focus_handle: FocusHandle,
     _token_subscription: Subscription,
     _search_subscription: Subscription,
     _ticker: Task<()>,
@@ -188,6 +201,7 @@ impl RootView {
             });
 
         let ticker = Self::spawn_ticker(cx);
+        let focus_handle = cx.focus_handle();
         let viewport = window.viewport_size();
         let volume = config::load_volume().unwrap_or(0.85);
         let mut audio = AudioEngine::new();
@@ -227,6 +241,7 @@ impl RootView {
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
+            focus_handle,
             _token_subscription: token_subscription,
             _search_subscription: search_subscription,
             _ticker: ticker,
@@ -239,6 +254,7 @@ impl RootView {
             view.load_profile(cx);
         }
 
+        window.focus(&view.focus_handle);
         view
     }
 
