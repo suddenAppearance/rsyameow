@@ -2,6 +2,7 @@
 
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Owns the output stream and the current player.
@@ -12,6 +13,9 @@ use std::time::Duration;
 pub struct AudioEngine {
     backend: Option<Backend>,
     volume: f32,
+    /// Raw bytes of the current track. Retained so a decoder can be rebuilt
+    /// when the format's demuxer refuses a backward seek.
+    bytes: Option<Arc<[u8]>>,
 }
 
 struct Backend {
@@ -25,6 +29,7 @@ impl AudioEngine {
         Self {
             backend: None,
             volume: 0.85,
+            bytes: None,
         }
     }
 
@@ -56,6 +61,8 @@ impl AudioEngine {
 
     /// Decode and play audio bytes (MP3 or FLAC) from the beginning.
     pub fn load(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        let bytes: Arc<[u8]> = Arc::from(bytes);
+        self.bytes = Some(bytes.clone());
         let backend = self.ensure_backend()?;
         backend.player.stop();
         let decoder = Decoder::try_from(Cursor::new(bytes))
@@ -91,10 +98,44 @@ impl AudioEngine {
             .backend
             .as_mut()
             .ok_or_else(|| "трек ещё не загружен".to_string())?;
+
+        // Fragmented FLAC/MP4 demuxers can only seek forward from their
+        // current position. Rebuild the decoder from the start for a backward
+        // seek instead of asking Symphonia to move its demuxer backwards.
+        if position < backend.player.get_pos() {
+            return self.reload_at(position);
+        }
+
+        match backend.player.try_seek(position) {
+            Ok(()) => Ok(()),
+            Err(_) => self.reload_at(position),
+        }
+    }
+
+    fn reload_at(&mut self, position: Duration) -> Result<(), String> {
+        let bytes = self
+            .bytes
+            .clone()
+            .ok_or_else(|| "трек ещё не загружен".to_string())?;
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| "трек ещё не загружен".to_string())?;
+        let paused = backend.player.is_paused();
+        backend.player.stop();
+        let decoder = Decoder::try_from(Cursor::new(bytes))
+            .map_err(|error| format!("не удалось декодировать аудио: {error}"))?;
+        backend.player.append(decoder);
         backend
             .player
             .try_seek(position)
-            .map_err(|error| format!("не удалось перемотать трек: {error}"))
+            .map_err(|error| format!("не удалось перемотать трек: {error}"))?;
+        if paused {
+            backend.player.pause();
+        } else {
+            backend.player.play();
+        }
+        Ok(())
     }
 
     pub fn position(&self) -> Duration {

@@ -335,34 +335,21 @@ impl RootView {
                 .whitespace_normal()
                 .child(lyrics);
 
-            let mut card = glass_card(theme).child(section_title(theme, "Текст трека"));
+            let mut content = div().w_full();
             if collapsed {
-                card = card.child(
+                content = content.child(
                     div()
-                        .relative()
+                        .w_full()
                         .max_h(px(288.0))
                         .overflow_hidden()
-                        .child(text)
-                        .child(
-                            div()
-                                .absolute()
-                                .bottom(px(0.0))
-                                .left(px(0.0))
-                                .right(px(0.0))
-                                .h(px(96.0))
-                                .bg(linear_gradient(
-                                    0.0,
-                                    linear_color_stop(rgba(0x0A0A0A00), 0.0),
-                                    linear_color_stop(rgba(0x0A0A0AF5), 1.0),
-                                )),
-                        ),
+                        .child(text),
                 );
             } else {
-                card = card.child(text);
+                content = content.child(text);
             }
 
             if is_long {
-                card = card.child(
+                content = content.child(
                     div().flex().justify_center().pt(px(space::SM)).child(
                         Button::new(
                             "lyrics-toggle",
@@ -381,6 +368,28 @@ impl RootView {
                     ),
                 );
             }
+
+            let mut card = glass_card(theme).relative().overflow_hidden();
+            if collapsed {
+                // The fade is a child of the whole card so it extends behind
+                // the card padding and the footer, not just the text block.
+                card = card.child(
+                    div()
+                        .absolute()
+                        .left(px(-20.0))
+                        .right(px(-20.0))
+                        .bottom(px(-20.0))
+                        .h(px(200.0))
+                        .bg(linear_gradient(
+                            180.0,
+                            linear_color_stop(rgba(0x0A0A0A00), 0.0),
+                            linear_color_stop(rgba(0x0A0A0AFA), 1.0),
+                        )),
+                );
+            }
+            card = card
+                .child(section_title(theme, "Текст трека"))
+                .child(content);
             body = body.child(card);
         }
 
