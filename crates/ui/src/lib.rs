@@ -9,6 +9,6 @@ pub mod theme;
 
 pub use components::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
-    ProgressBar, Spinner, Stat, TextInput, TextInputEvent, TrackRow,
+    ProgressBar, Slider, Spinner, Stat, TextInput, TextInputEvent, TrackRow,
 };
 pub use theme::{Colors, Fonts, Radii, Theme, icons, space, text};

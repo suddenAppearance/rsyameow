@@ -5,10 +5,11 @@ use gpui::{
 };
 use std::sync::{Arc, Mutex};
 
-use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Spinner};
+use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Slider, Spinner};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type SeekHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
+type VolumeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 
 /// The persistent playback bar at the bottom of the window.
 #[derive(IntoElement)]
@@ -23,6 +24,10 @@ pub struct PlayerBar {
     loading: bool,
     quality: Option<SharedString>,
     error: Option<SharedString>,
+    volume: f32,
+    compact: bool,
+    on_mute: Option<ClickHandler>,
+    on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
     on_previous: Option<ClickHandler>,
     on_next: Option<ClickHandler>,
@@ -42,6 +47,10 @@ impl PlayerBar {
             loading: false,
             quality: None,
             error: None,
+            volume: 0.85,
+            compact: false,
+            on_mute: None,
+            on_volume: None,
             on_toggle: None,
             on_previous: None,
             on_next: None,
@@ -93,6 +102,30 @@ impl PlayerBar {
 
     pub fn error(mut self, error: Option<impl Into<SharedString>>) -> Self {
         self.error = error.map(Into::into);
+        self
+    }
+
+    pub fn volume(mut self, volume: f32) -> Self {
+        self.volume = volume.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Hide non-essential controls in a narrow window.
+    pub fn compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
+        self
+    }
+
+    pub fn on_mute(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_mute = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_volume(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
+        self.on_volume = Some(Box::new(handler));
         self
     }
 
@@ -225,7 +258,7 @@ impl RenderOnce for PlayerBar {
             .flex()
             .items_center()
             .gap(px(space::MD))
-            .w(px(300.0))
+            .w(px(if self.compact { 260.0 } else { 300.0 }))
             .flex_shrink_0()
             .child(
                 gpui::div()
@@ -318,24 +351,64 @@ impl RenderOnce for PlayerBar {
             .child(controls)
             .child(progress_row);
 
+        let compact = self.compact;
+        let volume = self.volume;
+        let muted = volume <= 0.001;
+        let mut mute = IconButton::new(
+            "player-mute",
+            if muted {
+                icons::VOLUME_MUTED
+            } else {
+                icons::VOLUME
+            },
+        )
+        .size(30.0)
+        .icon_size(15.0);
+        if let Some(handler) = self.on_mute {
+            mute = mute.on_click(handler);
+        }
+
+        let mut slider = Slider::new(volume).width(if compact { 56.0 } else { 72.0 });
+        if let Some(handler) = self.on_volume {
+            slider = slider.on_change(handler);
+        }
+
+        let volume_group = gpui::div()
+            .flex()
+            .items_center()
+            .gap(px(space::XS))
+            .child(mute)
+            .child(slider)
+            .child(
+                gpui::div()
+                    .w(px(30.0))
+                    .text_size(px(text::XS))
+                    .text_color(theme.colors.text_muted)
+                    .text_right()
+                    .child(format!("{:.0}%", volume * 100.0)),
+            );
+
         let mut right = gpui::div()
-            .w(px(190.0))
+            .w(px(if compact { 146.0 } else { 300.0 }))
             .flex_shrink_0()
             .flex()
             .items_center()
             .justify_end()
-            .gap(px(space::SM));
+            .gap(px(space::SM))
+            .child(volume_group);
 
-        if self.error.is_some() {
-            right = right.child(Badge::new("Ошибка").tone(BadgeTone::Danger));
-        }
+        if !compact {
+            if self.error.is_some() {
+                right = right.child(Badge::new("Ошибка").tone(BadgeTone::Danger));
+            }
 
-        if let Some(quality) = self.quality {
-            right = right.child(
-                Badge::new(quality)
-                    .tone(BadgeTone::Outline)
-                    .icon(icons::MUSIC),
-            );
+            if let Some(quality) = self.quality {
+                right = right.child(
+                    Badge::new(quality)
+                        .tone(BadgeTone::Outline)
+                        .icon(icons::MUSIC),
+                );
+            }
         }
 
         gpui::div()

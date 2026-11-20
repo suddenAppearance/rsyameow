@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 const CONFIG_DIR: &str = "rsyameow";
 const SESSION_FILE: &str = "session.json";
 const WINDOW_FILE: &str = "window.json";
+const PLAYBACK_FILE: &str = "playback.json";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Session {
@@ -19,6 +20,12 @@ struct Session {
 struct WindowSize {
     width: f32,
     height: f32,
+}
+
+/// Playback preferences (currently only volume).
+#[derive(Debug, Serialize, Deserialize)]
+struct PlaybackSettings {
+    volume: f32,
 }
 
 /// Returns the directory used for the session file.
@@ -95,6 +102,34 @@ pub fn save_window_size(width: f32, height: f32) -> io::Result<()> {
     })
     .map_err(io::Error::other)?;
     fs::write(dir.join(WINDOW_FILE), data)
+}
+
+/// Load the saved player volume, clamped to `0.0..=1.0`.
+pub fn load_volume() -> Option<f32> {
+    let path = config_dir()?.join(PLAYBACK_FILE);
+    let data = fs::read_to_string(path).ok()?;
+    let settings: PlaybackSettings = serde_json::from_str(&data).ok()?;
+    if settings.volume.is_finite() {
+        Some(settings.volume.clamp(0.0, 1.0))
+    } else {
+        None
+    }
+}
+
+/// Persist the player volume.
+pub fn save_volume(volume: f32) -> io::Result<()> {
+    if !volume.is_finite() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid volume",
+        ));
+    }
+    let dir = ensure_config_dir()?;
+    let data = serde_json::to_vec_pretty(&PlaybackSettings {
+        volume: volume.clamp(0.0, 1.0),
+    })
+    .map_err(io::Error::other)?;
+    fs::write(dir.join(PLAYBACK_FILE), data)
 }
 
 fn ensure_config_dir() -> io::Result<PathBuf> {
@@ -185,6 +220,9 @@ mod tests {
 
         save_window_size(1200.0, 800.0).unwrap();
         assert_eq!(load_window_size(), Some((1200.0, 800.0)));
+
+        save_volume(0.42).unwrap();
+        assert_eq!(load_volume(), Some(0.42));
 
         clear_token();
         assert_eq!(load_token(), None);

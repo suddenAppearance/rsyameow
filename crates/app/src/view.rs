@@ -1313,6 +1313,7 @@ impl RootView {
         let elapsed = format::duration(self.player.position);
 
         let view = cx.entity();
+        let volume_view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
             .cover(self.player.cover.clone())
@@ -1321,6 +1322,14 @@ impl RootView {
             .loading(self.player.loading)
             .quality(self.player.quality.clone())
             .error(self.player.error.clone())
+            .volume(self.volume)
+            .compact(self.viewport_width < 1100.0)
+            .on_mute(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.toggle_mute(cx);
+            }))
+            .on_volume(move |volume, _, cx| {
+                volume_view.update(cx, |this, cx| this.set_volume(volume, cx));
+            })
             .on_toggle(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.toggle_playback(cx);
             }))

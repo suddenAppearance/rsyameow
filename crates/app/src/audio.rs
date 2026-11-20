@@ -11,6 +11,7 @@ use std::time::Duration;
 /// starting.
 pub struct AudioEngine {
     backend: Option<Backend>,
+    volume: f32,
 }
 
 struct Backend {
@@ -21,7 +22,18 @@ struct Backend {
 
 impl AudioEngine {
     pub fn new() -> Self {
-        Self { backend: None }
+        Self {
+            backend: None,
+            volume: 0.85,
+        }
+    }
+
+    /// Set the output volume; the value is remembered until a device opens.
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+        if let Some(backend) = self.backend.as_ref() {
+            backend.player.set_volume(self.volume);
+        }
     }
 
     fn ensure_backend(&mut self) -> Result<&mut Backend, String> {
@@ -33,7 +45,7 @@ impl AudioEngine {
                 )
             })?;
             let player = Player::connect_new(sink.mixer());
-            player.set_volume(0.85);
+            player.set_volume(self.volume);
             self.backend = Some(Backend {
                 _sink: sink,
                 player,

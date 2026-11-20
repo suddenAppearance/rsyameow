@@ -98,6 +98,8 @@ pub struct RootView {
     pub(crate) playback_epoch: u64,
     pub(crate) queue: Vec<String>,
     pub(crate) queue_index: Option<usize>,
+    pub(crate) volume: f32,
+    previous_volume: f32,
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
@@ -142,6 +144,9 @@ impl RootView {
 
         let ticker = Self::spawn_ticker(cx);
         let viewport = window.viewport_size();
+        let volume = config::load_volume().unwrap_or(0.85);
+        let mut audio = AudioEngine::new();
+        audio.set_volume(volume);
 
         let mut view = Self {
             screen: Screen::Login,
@@ -161,10 +166,12 @@ impl RootView {
             pending_save_token: None,
             covers: HashMap::new(),
             player: PlayerState::default(),
-            audio: AudioEngine::new(),
+            audio,
             playback_epoch: 0,
             queue: Vec::new(),
             queue_index: None,
+            volume,
+            previous_volume: if volume > 0.0 { volume } else { 0.85 },
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
@@ -980,6 +987,28 @@ impl RootView {
             .ok();
         })
         .detach();
+    }
+
+    pub(crate) fn set_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        let volume = volume.clamp(0.0, 1.0);
+        self.volume = volume;
+        if volume > 0.0 {
+            self.previous_volume = volume;
+        }
+        self.audio.set_volume(volume);
+        if let Err(error) = config::save_volume(volume) {
+            eprintln!("rsyameow: failed to save volume: {error}");
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_mute(&mut self, cx: &mut Context<Self>) {
+        if self.volume > 0.0 {
+            self.previous_volume = self.volume;
+            self.set_volume(0.0, cx);
+        } else {
+            self.set_volume(self.previous_volume.max(0.2), cx);
+        }
     }
 
     pub(crate) fn seek_to(&mut self, fraction: f32, cx: &mut Context<Self>) {
