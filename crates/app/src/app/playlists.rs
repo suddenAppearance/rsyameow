@@ -89,8 +89,12 @@ impl RootView {
                 if id.is_empty() {
                     continue;
                 }
+                let palette_key = format!("playlist-{id}");
                 let already = this
-                    .update(cx, |this, _| this.playlist_covers.contains_key(&id))
+                    .update(cx, |this, _| {
+                        this.playlist_covers.contains_key(&id)
+                            && this.track_palettes.contains_key(&palette_key)
+                    })
                     .unwrap_or(true);
                 if already {
                     continue;
@@ -105,6 +109,8 @@ impl RootView {
                 let Some(bytes) = bytes else {
                     continue;
                 };
+                let palette = cover_palette(&bytes);
+                let backdrop = super::cover_art::blurred_cover(&bytes);
                 let Some(image) = decode_image(bytes) else {
                     continue;
                 };
@@ -112,6 +118,12 @@ impl RootView {
                     .update(cx, |this, cx| {
                         if this.playlists.epoch != epoch {
                             return false;
+                        }
+                        if let Some(palette) = palette {
+                            this.track_palettes.insert(palette_key.clone(), palette);
+                        }
+                        if let Some(backdrop) = backdrop {
+                            this.track_backdrops.insert(palette_key.clone(), backdrop);
                         }
                         this.playlist_covers.insert(id, image);
                         cx.notify();

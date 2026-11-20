@@ -18,7 +18,7 @@ mod tests;
 mod track;
 mod wave;
 
-pub(crate) use cover_art::{cover_palette, decode_image, error_text};
+pub(crate) use cover_art::{cover_palette, decode_image, default_palette, error_text};
 pub(crate) use playback::step_index;
 pub(crate) use presentation::{plan_name, plus_until, registered_year};
 

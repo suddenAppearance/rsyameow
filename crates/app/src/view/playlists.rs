@@ -27,6 +27,13 @@ impl RootView {
         let loading = self.playlists.loading;
         let loaded = self.playlists.loaded;
         let error = self.playlists.error.clone();
+        let palette = items
+            .first()
+            .map(|playlist| self.playlist_palette(playlist))
+            .unwrap_or_else(default_palette);
+        let backdrop = items
+            .first()
+            .and_then(|playlist| self.playlist_backdrop(playlist));
 
         let header = div()
             .flex()
@@ -103,7 +110,7 @@ impl RootView {
 
         if loading && items.is_empty() {
             body = body.child(
-                card(theme)
+                glass_card(theme)
                     .items_center()
                     .py(px(space::XXL))
                     .child(Spinner::new().size(24.0).color(theme.colors.accent))
@@ -153,7 +160,7 @@ impl RootView {
                     .gap(px(space::SM))
                     .p(px(space::SM))
                     .rounded(px(14.0))
-                    .bg(theme.colors.surface)
+                    .bg(gpui::rgba(0x0808088C))
                     .border_1()
                     .border_color(theme.colors.border)
                     .cursor_pointer()
@@ -200,16 +207,15 @@ impl RootView {
             body = body.child(grid);
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .id("playlists-scroll")
-            .overflow_y_scroll()
-            .child(
-                div().w_full().flex().justify_center().child(
+        immersive_scroll_page(
+            palette,
+            backdrop,
+            "playlists-scroll",
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
                     div()
                         .w_full()
                         .max_w(px(1180.0))
@@ -226,9 +232,9 @@ impl RootView {
                                 .text_color(theme.colors.text_muted)
                                 .child("Плейлисты загружаются из вашей медиатеки Яндекс Музыки."),
                         ),
-                ),
-            )
-            .into_any_element()
+                )
+                .into_any_element(),
+        )
     }
 
     pub(crate) fn playlist_detail_content(
@@ -247,6 +253,8 @@ impl RootView {
         };
 
         let cover = self.playlist_cover_image(&playlist);
+        let palette = self.playlist_palette(&playlist);
+        let backdrop = self.playlist_backdrop(&playlist);
         let title = playlist.display_title().to_string();
         let owner = playlist
             .owner
@@ -315,7 +323,7 @@ impl RootView {
             .gap(px(space::XL))
             .p(px(space::XL))
             .rounded(px(20.0))
-            .bg(theme.colors.surface)
+            .bg(gpui::rgba(0x0808088C))
             .border_1()
             .border_color(theme.colors.border)
             .child(playlist_cover(theme, cover, 168.0).w(px(168.0)))
@@ -401,7 +409,7 @@ impl RootView {
 
         if loading {
             body = body.child(
-                card(theme)
+                glass_card(theme)
                     .items_center()
                     .py(px(space::XXL))
                     .child(Spinner::new().size(24.0).color(theme.colors.accent))
@@ -420,7 +428,7 @@ impl RootView {
                 "Добавьте треки в плейлист в Яндекс Музыке и обновите страницу.",
             ));
         } else {
-            let mut list = card(theme).child(
+            let mut list = glass_card(theme).child(
                 div()
                     .flex()
                     .items_center()
@@ -480,16 +488,15 @@ impl RootView {
             body = body.child(list);
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .id("playlist-detail-scroll")
-            .overflow_y_scroll()
-            .child(
-                div().w_full().flex().justify_center().child(
+        immersive_scroll_page(
+            palette,
+            backdrop,
+            "playlist-detail-scroll",
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
                     div()
                         .w_full()
                         .max_w(px(1180.0))
@@ -500,9 +507,33 @@ impl RootView {
                         .child(header)
                         .child(hero)
                         .child(body),
-                ),
-            )
-            .into_any_element()
+                )
+                .into_any_element(),
+        )
+    }
+
+    pub(crate) fn playlist_palette(&self, playlist: &Playlist) -> (Rgba, Rgba) {
+        let key = format!("playlist-{}", playlist.playlist_id());
+        self.track_palettes
+            .get(&key)
+            .copied()
+            .or_else(|| {
+                playlist
+                    .tracks
+                    .first()
+                    .and_then(|short| self.track_palettes.get(&short.id).copied())
+            })
+            .unwrap_or_else(default_palette)
+    }
+
+    pub(crate) fn playlist_backdrop(&self, playlist: &Playlist) -> Option<Arc<Image>> {
+        let key = format!("playlist-{}", playlist.playlist_id());
+        self.track_backdrops.get(&key).cloned().or_else(|| {
+            playlist
+                .tracks
+                .first()
+                .and_then(|short| self.track_backdrops.get(&short.id).cloned())
+        })
     }
 
     pub(crate) fn playlist_cover_image(&self, playlist: &Playlist) -> Option<Arc<Image>> {

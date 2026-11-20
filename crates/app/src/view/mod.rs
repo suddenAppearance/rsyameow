@@ -16,7 +16,8 @@ use shell::{resize_handle, title_bar};
 
 use crate::app::{
     CloseQueue, CloseWindow, FocusSearch, NextTrack, PreviousTrack, QueueSource, RootView, Screen,
-    SearchKind, ToggleMute, TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
+    SearchKind, ToggleMute, TogglePlayback, ToggleQueue, default_palette, plan_name, plus_until,
+    registered_year,
 };
 use crate::format;
 use gpui::{
