@@ -524,6 +524,9 @@ impl RenderOnce for PlayerBar {
             .gap(px(6.0))
             .flex_1()
             .min_w(px(0.0))
+            .h_full()
+            .border_r_1()
+            .border_color(theme.colors.border)
             .child(controls)
             .child(progress_row);
 
