@@ -150,19 +150,13 @@ impl RootView {
         let Some(playlist) = self.playlists.selected.clone() else {
             return;
         };
-        let loaded_ids = self
-            .playlists
-            .tracks
-            .iter()
-            .map(|track| track.full_id())
-            .collect::<Vec<_>>();
+        // The initial detail request resolves the first 100 playlist entries;
+        // continue from the current position in the original track order.
+        let offset = self.playlists.tracks.len();
         let ids: Vec<String> = playlist
             .tracks
             .iter()
-            .filter(|short| {
-                let full = short.track_id();
-                !loaded_ids.iter().any(|id| id == &full || id == &short.id)
-            })
+            .skip(offset)
             .take(50)
             .map(TrackShort::track_id)
             .collect();
