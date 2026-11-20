@@ -1,8 +1,10 @@
 use crate::theme::Theme;
 use gpui::{
-    App, Bounds, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, RenderOnce, Window,
-    canvas, prelude::*, px, relative,
+    App, Bounds, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    RenderOnce, Window, canvas, prelude::*, px, relative,
 };
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 type ChangeHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -49,6 +51,11 @@ impl RenderOnce for Slider {
         let handler = self.on_change;
         let handler_for_down = handler.clone();
         let handler_for_move = handler;
+        let dragging = Rc::new(Cell::new(false));
+        let dragging_for_down = dragging.clone();
+        let dragging_for_move = dragging.clone();
+        let dragging_for_up = dragging.clone();
+        let dragging_for_up_out = dragging;
 
         gpui::div()
             .relative()
@@ -76,11 +83,12 @@ impl RenderOnce for Slider {
                     let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x))
                         / width)
                         .clamp(0.0, 1.0);
+                    dragging_for_down.set(true);
                     handler(value, window, cx);
                 },
             )
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                if !event.dragging() {
+                if !event.dragging() || !dragging_for_move.get() {
                     return;
                 }
                 let Some(handler) = handler_for_move.as_ref() else {
@@ -99,6 +107,12 @@ impl RenderOnce for Slider {
                 let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
                     .clamp(0.0, 1.0);
                 handler(value, window, cx);
+            })
+            .on_mouse_up(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
+                dragging_for_up.set(false);
+            })
+            .on_mouse_up_out(MouseButton::Left, move |_: &MouseUpEvent, _, _| {
+                dragging_for_up_out.set(false);
             })
             .child(
                 gpui::div()
