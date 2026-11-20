@@ -138,6 +138,36 @@ pub(crate) fn glass_card(theme: &Theme) -> Div {
         .text_color(theme.colors.white)
 }
 
+pub(crate) fn immersive_scroll_page(
+    palette: (Rgba, Rgba),
+    backdrop: Option<Arc<Image>>,
+    scroll_id: &'static str,
+    content: AnyElement,
+) -> AnyElement {
+    div()
+        .relative()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .overflow_hidden()
+        .bg(palette.0)
+        .child(immersive_background(palette, backdrop))
+        .child(
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h(px(0.0))
+                .id(scroll_id)
+                .overflow_y_scroll()
+                .child(content),
+        )
+        .into_any_element()
+}
+
 pub(crate) fn immersive_background(
     palette: (Rgba, Rgba),
     backdrop: Option<Arc<Image>>,

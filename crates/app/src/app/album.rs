@@ -126,7 +126,11 @@ impl RootView {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             for (key, url) in covers {
                 let already = this
-                    .update(cx, |this, _| this.search_images.contains_key(&key))
+                    .update(cx, |this, _| {
+                        this.search_images.contains_key(&key)
+                            && this.track_palettes.contains_key(&key)
+                            && this.track_backdrops.contains_key(&key)
+                    })
                     .unwrap_or(true);
                 if already {
                     continue;
@@ -138,6 +142,8 @@ impl RootView {
                 let Some(bytes) = bytes else {
                     continue;
                 };
+                let palette = cover_palette(&bytes);
+                let backdrop = super::cover_art::blurred_cover(&bytes);
                 let Some(image) = decode_image(bytes) else {
                     continue;
                 };
@@ -145,6 +151,12 @@ impl RootView {
                     .update(cx, |this, cx| {
                         if this.profile_epoch != epoch {
                             return false;
+                        }
+                        if let Some(palette) = palette {
+                            this.track_palettes.insert(key.clone(), palette);
+                        }
+                        if let Some(backdrop) = backdrop {
+                            this.track_backdrops.insert(key.clone(), backdrop);
                         }
                         this.search_images.insert(key, image);
                         cx.notify();

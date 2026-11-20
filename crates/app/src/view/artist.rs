@@ -16,6 +16,11 @@ impl RootView {
         let loading = self.artist.loading;
         let error = self.artist.error.clone();
         let artist_id = self.artist.id;
+        let background_key = artist_id
+            .map(|id| format!("artist-{id}"))
+            .unwrap_or_default();
+        let palette = self.track_palette(&background_key);
+        let backdrop = self.track_backdrop(&background_key);
         let cover =
             artist_id.and_then(|id| self.search_images.get(&format!("artist-{id}")).cloned());
         let current_id = self.player.track.as_ref().map(|track| track.id.clone());
@@ -87,7 +92,7 @@ impl RootView {
                     ),
             );
 
-        let hero = card(theme)
+        let hero = glass_card(theme)
             .flex_row()
             .items_center()
             .gap(px(space::XL))
@@ -155,7 +160,7 @@ impl RootView {
 
         if loading {
             body = body.child(
-                card(theme)
+                glass_card(theme)
                     .items_center()
                     .py(px(space::XXL))
                     .child(Spinner::new().size(24.0).color(theme.colors.accent))
@@ -171,7 +176,7 @@ impl RootView {
                 body = body.child(error_banner(theme, &error));
             }
 
-            let mut tracks_card = card(theme).child(
+            let mut tracks_card = glass_card(theme).child(
                 div()
                     .flex()
                     .items_center()
@@ -352,16 +357,15 @@ impl RootView {
             }
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .id("artist-scroll")
-            .overflow_y_scroll()
-            .child(
-                div().w_full().flex().justify_center().child(
+        immersive_scroll_page(
+            palette,
+            backdrop,
+            "artist-scroll",
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
                     div()
                         .w_full()
                         .max_w(px(1180.0))
@@ -372,9 +376,9 @@ impl RootView {
                         .child(header)
                         .child(hero)
                         .child(body),
-                ),
-            )
-            .into_any_element()
+                )
+                .into_any_element(),
+        )
     }
 
     pub(crate) fn artist_tracks_view(
@@ -391,6 +395,13 @@ impl RootView {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let background_key = self
+            .artist
+            .id
+            .map(|id| format!("artist-{id}"))
+            .unwrap_or_default();
+        let palette = self.track_palette(&background_key);
+        let backdrop = self.track_backdrop(&background_key);
         let artist_name = self
             .artist
             .artist
@@ -453,7 +464,7 @@ impl RootView {
                     ),
             );
 
-        let mut list = card(theme).child(
+        let mut list = glass_card(theme).child(
             div()
                 .flex()
                 .items_center()
@@ -523,16 +534,15 @@ impl RootView {
             }
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .id("artist-tracks-scroll")
-            .overflow_y_scroll()
-            .child(
-                div().w_full().flex().justify_center().child(
+        immersive_scroll_page(
+            palette,
+            backdrop,
+            "artist-tracks-scroll",
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
                     div()
                         .w_full()
                         .max_w(px(1180.0))
@@ -560,9 +570,9 @@ impl RootView {
                                 ),
                         )
                         .child(list),
-                ),
-            )
-            .into_any_element()
+                )
+                .into_any_element(),
+        )
     }
 
     pub(crate) fn artist_albums_view(
@@ -579,6 +589,13 @@ impl RootView {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let background_key = self
+            .artist
+            .id
+            .map(|id| format!("artist-{id}"))
+            .unwrap_or_default();
+        let palette = self.track_palette(&background_key);
+        let backdrop = self.track_backdrop(&background_key);
         let artist_name = self
             .artist
             .artist
@@ -604,7 +621,7 @@ impl RootView {
         }
         if loading && albums.is_empty() {
             body = body.child(
-                card(theme)
+                glass_card(theme)
                     .items_center()
                     .py(px(space::XXL))
                     .child(Spinner::new().size(24.0).color(theme.colors.accent))
@@ -689,16 +706,15 @@ impl RootView {
             body = body.child(grid);
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .id("artist-albums-scroll")
-            .overflow_y_scroll()
-            .child(
-                div().w_full().flex().justify_center().child(
+        immersive_scroll_page(
+            palette,
+            backdrop,
+            "artist-albums-scroll",
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
                     div()
                         .w_full()
                         .max_w(px(1180.0))
@@ -726,8 +742,8 @@ impl RootView {
                                 ),
                         )
                         .child(body),
-                ),
-            )
-            .into_any_element()
+                )
+                .into_any_element(),
+        )
     }
 }
