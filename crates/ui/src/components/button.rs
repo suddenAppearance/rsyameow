@@ -251,6 +251,7 @@ pub struct IconButton {
     icon_size: f32,
     variant: ButtonVariant,
     disabled: bool,
+    loading: bool,
     on_click: Option<ClickHandler>,
 }
 
@@ -263,6 +264,7 @@ impl IconButton {
             icon_size: 18.0,
             variant: ButtonVariant::Ghost,
             disabled: false,
+            loading: false,
             on_click: None,
         }
     }
@@ -284,6 +286,11 @@ impl IconButton {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn loading(mut self, loading: bool) -> Self {
+        self.loading = loading;
         self
     }
 
@@ -323,6 +330,17 @@ impl RenderOnce for IconButton {
         };
 
         let disabled = self.disabled;
+        let content = if self.loading {
+            Spinner::new()
+                .size(self.icon_size)
+                .color(foreground)
+                .into_any_element()
+        } else {
+            Icon::new(self.icon)
+                .size(self.icon_size)
+                .color(foreground)
+                .into_any_element()
+        };
         let mut button = gpui::div()
             .id(self.id)
             .size(px(self.size))
@@ -332,10 +350,10 @@ impl RenderOnce for IconButton {
             .justify_center()
             .bg(background)
             .flex_shrink_0()
-            .child(Icon::new(self.icon).size(self.icon_size).color(foreground));
+            .child(content);
 
         if disabled {
-            button = button.opacity(0.4);
+            button = button.opacity(if self.loading { 0.85 } else { 0.4 });
         } else {
             button = button
                 .cursor_pointer()

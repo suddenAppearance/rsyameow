@@ -5,7 +5,7 @@ use gpui::{
 };
 use std::sync::Arc;
 
-use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, SeekBar, Slider, Spinner};
+use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, SeekBar, Slider};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -277,7 +277,7 @@ impl RenderOnce for PlayerBar {
             theme.colors.text_muted
         };
 
-        let mut left_meta = gpui::div()
+        let left_meta = gpui::div()
             .flex()
             .flex_col()
             .min_w(px(0.0))
@@ -353,19 +353,6 @@ impl RenderOnce for PlayerBar {
                     }),
             );
 
-        if self.loading {
-            left_meta = left_meta.child(
-                gpui::div()
-                    .flex()
-                    .items_center()
-                    .gap(px(space::XS))
-                    .text_size(px(text::XS))
-                    .text_color(theme.colors.text_muted)
-                    .child(Spinner::new().size(11.0))
-                    .child("Загрузка трека…"),
-            );
-        }
-
         let mut left = gpui::div()
             .id("player-track-info")
             .group("player-track-info")
@@ -407,7 +394,8 @@ impl RenderOnce for PlayerBar {
         )
         .size(42.0)
         .icon_size(18.0)
-        .variant(ButtonVariant::Primary);
+        .variant(ButtonVariant::Primary)
+        .loading(self.loading);
 
         if !has_track || self.loading {
             toggle = toggle.disabled(true);
