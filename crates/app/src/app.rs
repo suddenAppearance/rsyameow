@@ -19,6 +19,7 @@ actions!(
         PreviousTrack,
         ToggleMute,
         ToggleQueue,
+        CloseQueue,
         FocusSearch
     ]
 );
@@ -731,6 +732,7 @@ impl RootView {
             return;
         }
         self.screen = Screen::Search;
+        self.queue_open = false;
         let focus = self.search_input.read(cx).focus_handle(cx);
         window.focus(&focus);
         cx.notify();
@@ -1473,6 +1475,9 @@ impl RootView {
     // -------------------------------------------------------------------- Queue
 
     pub(crate) fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
         self.queue_open = !self.queue_open;
         if self.queue_open {
             self.fetch_queue_tracks(cx);
@@ -1525,7 +1530,7 @@ impl RootView {
         let missing: Vec<String> = self.queue[start..end]
             .iter()
             .filter(|id| !self.queue_track_cache.contains_key(*id))
-            .take(30)
+            .take(40)
             .cloned()
             .collect();
         if missing.is_empty() {
@@ -1854,6 +1859,9 @@ impl RootView {
     }
 
     pub(crate) fn toggle_playback(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
         if self.player.loading {
             return;
         }

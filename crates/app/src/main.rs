@@ -9,7 +9,8 @@ mod format;
 mod view;
 
 use app::{
-    FocusSearch, NextTrack, PreviousTrack, RootView, ToggleMute, TogglePlayback, ToggleQueue,
+    CloseQueue, FocusSearch, NextTrack, PreviousTrack, RootView, ToggleMute, TogglePlayback,
+    ToggleQueue,
 };
 use assets::Assets;
 use gpui::{
@@ -111,6 +112,7 @@ fn main() {
                 KeyBinding::new("ctrl-left", PreviousTrack, Some("rsyameow")),
                 KeyBinding::new("ctrl-m", ToggleMute, Some("rsyameow")),
                 KeyBinding::new("ctrl-q", ToggleQueue, Some("rsyameow")),
+                KeyBinding::new("escape", CloseQueue, Some("rsyameow")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("rsyameow")),
             ]);
 

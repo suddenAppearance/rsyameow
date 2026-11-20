@@ -1,7 +1,7 @@
 //! Rendering for [`RootView`].
 
 use crate::app::{
-    FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind, ToggleMute,
+    CloseQueue, FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind, ToggleMute,
     TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
 };
 use crate::format;
@@ -52,6 +52,7 @@ impl Render for RootView {
             .on_action(cx.listener(|this, _: &PreviousTrack, _, cx| this.play_previous(cx)))
             .on_action(cx.listener(|this, _: &ToggleMute, _, cx| this.toggle_mute(cx)))
             .on_action(cx.listener(|this, _: &ToggleQueue, _, cx| this.toggle_queue(cx)))
+            .on_action(cx.listener(|this, _: &CloseQueue, _, cx| this.close_queue(cx)))
             .on_action(
                 cx.listener(|this, _: &FocusSearch, window, cx| this.open_search(window, cx)),
             )
