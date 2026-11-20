@@ -37,6 +37,7 @@ impl Render for RootView {
             Screen::Loading => self.loading_view(&theme),
             Screen::LoadError(message) => self.load_error_view(message, &theme, cx),
             Screen::Profile => self.profile_view(&theme, cx),
+            Screen::Liked => self.liked_view(&theme, cx),
             Screen::Search => self.search_view(&theme, cx),
             Screen::Playlists => self.playlists_view(&theme, cx),
             Screen::Playlist => self.playlist_detail_view(&theme, cx),
@@ -775,6 +776,180 @@ impl RootView {
             .into_any_element()
     }
 
+    fn liked_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let content = self.liked_content(theme, cx);
+        self.app_shell(theme, cx, content)
+    }
+
+    fn liked_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let total = self
+            .profile
+            .as_ref()
+            .map(|profile| profile.total_liked)
+            .unwrap_or(0);
+
+        let header = div()
+            .flex()
+            .items_end()
+            .justify_between()
+            .gap(px(space::LG))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(text::DISPLAY))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .child("Любимые треки"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(text::SM))
+                            .text_color(theme.colors.text_secondary)
+                            .child("Вся коллекция «Мне нравится»"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(space::SM))
+                    .child(
+                        IconButton::new("refresh-liked", icons::REFRESH)
+                            .size(38.0)
+                            .icon_size(16.0)
+                            .variant(ButtonVariant::Secondary)
+                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                if this.demo {
+                                    this.start_demo(cx);
+                                } else {
+                                    this.retry_profile(cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("shuffle-liked", "Перемешать")
+                            .variant(ButtonVariant::Primary)
+                            .icon(icons::SHUFFLE)
+                            .loading(self.player.loading)
+                            .disabled(total == 0)
+                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                this.play_random(cx);
+                            })),
+                    ),
+            );
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .id("liked-scroll")
+            .overflow_y_scroll()
+            .child(
+                div().w_full().flex().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(1180.0))
+                        .p(px(space::XL))
+                        .flex()
+                        .flex_col()
+                        .gap(px(space::LG))
+                        .child(header)
+                        .child(self.liked_section(theme, cx))
+                        .child(
+                            div()
+                                .pt(px(space::SM))
+                                .text_size(px(text::XS))
+                                .text_color(theme.colors.text_muted)
+                                .child(format!(
+                                    "Показаны {} последних треков из {}.",
+                                    self.profile
+                                        .as_ref()
+                                        .map(|profile| profile.sample.len())
+                                        .unwrap_or(0),
+                                    total
+                                )),
+                        ),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn liked_summary(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let total = self
+            .profile
+            .as_ref()
+            .map(|profile| profile.total_liked)
+            .unwrap_or(0);
+
+        card(theme)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(space::LG))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(space::MD))
+                            .child(
+                                div()
+                                    .size(px(42.0))
+                                    .rounded(px(12.0))
+                                    .bg(theme.colors.accent_soft)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        Icon::new(icons::HEART)
+                                            .size(20.0)
+                                            .color(theme.colors.accent),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(1.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(text::BASE))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child("Любимые треки"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(text::SM))
+                                            .text_color(theme.colors.text_muted)
+                                            .child(format::plural(
+                                                total as u64,
+                                                "трек в коллекции",
+                                                "трека в коллекции",
+                                                "треков в коллекции",
+                                            )),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        Button::new("open-liked", "Открыть")
+                            .variant(ButtonVariant::Secondary)
+                            .trailing_icon(icons::CHEVRON_RIGHT)
+                            .on_click(
+                                cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                    this.open_liked(cx)
+                                }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn profile_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let main = self.main_content(theme, cx);
         self.app_shell(theme, cx, main)
@@ -796,14 +971,15 @@ impl RootView {
             .unwrap_or_default();
 
         let profile_active = matches!(self.screen, Screen::Profile);
+        let liked_active = matches!(self.screen, Screen::Liked);
         let search_active = matches!(self.screen, Screen::Search);
         let playlists_active = matches!(self.screen, Screen::Playlists | Screen::Playlist);
         let accent = theme.colors.accent;
         let secondary = theme.colors.text_secondary;
         let hover_bg = theme.colors.surface_hover;
 
-        let nav_profile = div()
-            .id("nav-profile")
+        let nav_liked = div()
+            .id("nav-liked")
             .flex()
             .items_center()
             .gap(px(space::MD))
@@ -813,21 +989,21 @@ impl RootView {
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
-            .when(profile_active, |element| {
+            .when(liked_active, |element| {
                 element.bg(theme.colors.accent_soft).text_color(accent)
             })
-            .when(!profile_active, |element| {
+            .when(!liked_active, |element| {
                 element
                     .text_color(secondary)
                     .hover(move |style| style.bg(hover_bg))
             })
-            .child(Icon::new(icons::USER).size(17.0).color(if profile_active {
+            .child(Icon::new(icons::HEART).size(17.0).color(if liked_active {
                 accent
             } else {
                 secondary
             }))
-            .child("Профиль")
-            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_profile(cx)));
+            .child("Любимые")
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_liked(cx)));
 
         let nav_search = div()
             .id("nav-search")
@@ -887,7 +1063,52 @@ impl RootView {
                 this.open_playlists(cx);
             }));
 
-        let mut account_card = div()
+        let profile_zone = div()
+            .id("account-profile")
+            .flex()
+            .items_center()
+            .gap(px(space::SM))
+            .flex_1()
+            .min_w(px(0.0))
+            .rounded(px(8.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.colors.surface_hover))
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.open_profile(cx);
+            }))
+            .child(Avatar::new(name.clone()).size(34.0).ring(true))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .text_size(px(text::SM))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(text::XS))
+                            .text_color(theme.colors.text_muted)
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(if login.is_empty() {
+                                "демо-режим".to_string()
+                            } else {
+                                login.clone()
+                            }),
+                    ),
+            );
+
+        let account_card = div()
             .flex()
             .items_center()
             .gap(px(space::SM))
@@ -895,50 +1116,20 @@ impl RootView {
             .rounded(px(12.0))
             .bg(theme.colors.surface)
             .border_1()
-            .border_color(theme.colors.border)
-            .cursor_pointer()
-            .hover(|style| style.bg(theme.colors.surface_hover));
-
-        account_card = account_card.child(Avatar::new(name.clone()).size(34.0).ring(true));
-        account_card = account_card.child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w(px(0.0))
-                .gap(px(1.0))
-                .child(
-                    div()
-                        .text_size(px(text::SM))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .child(name.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(px(text::XS))
-                        .text_color(theme.colors.text_muted)
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .child(if login.is_empty() {
-                            "демо-режим".to_string()
-                        } else {
-                            login.clone()
-                        }),
-                ),
-        );
-
-        account_card = account_card.child(
-            IconButton::new("sidebar-logout", icons::LOGOUT)
-                .size(30.0)
-                .icon_size(14.0)
-                .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                    this.logout(cx);
-                })),
-        );
+            .border_color(if profile_active {
+                theme.colors.accent
+            } else {
+                theme.colors.border
+            })
+            .child(profile_zone)
+            .child(
+                IconButton::new("sidebar-logout", icons::LOGOUT)
+                    .size(30.0)
+                    .icon_size(14.0)
+                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                        this.logout(cx);
+                    })),
+            );
 
         let mut sidebar = div()
             .w(px(244.0))
@@ -969,7 +1160,7 @@ impl RootView {
                     .flex_col()
                     .gap(px(space::XS))
                     .child(section_label(theme, "МЕНЮ"))
-                    .child(nav_profile)
+                    .child(nav_liked)
                     .child(nav_search)
                     .child(nav_playlists),
             )
@@ -1032,7 +1223,7 @@ impl RootView {
                         div()
                             .text_size(px(text::SM))
                             .text_color(theme.colors.text_secondary)
-                            .child("Аккаунт, подписка и любимая музыка в одном месте"),
+                            .child("Аккаунт и подписка Яндекс Музыки"),
                     ),
             )
             .child(
@@ -1067,7 +1258,7 @@ impl RootView {
 
         let hero = self.hero_card(theme, status, &name, &login, liked_total);
         let details = self.details_row(theme, status);
-        let liked = self.liked_section(theme, cx);
+        let liked_summary = self.liked_summary(theme, cx);
 
         div()
             .flex()
@@ -1093,7 +1284,7 @@ impl RootView {
                             .child(header)
                             .child(hero)
                             .child(details)
-                            .child(liked)
+                            .child(liked_summary)
                             .child(
                                 div()
                                     .pt(px(space::SM))
@@ -1372,37 +1563,22 @@ impl RootView {
         };
 
         let mut section = card(theme).child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(space::MD))
-                        .child(section_title(theme, "Любимые треки"))
-                        .child(
-                            Badge::new(format::plural(
-                                profile.total_liked as u64,
-                                "трек",
-                                "трека",
-                                "треков",
-                            ))
-                            .tone(BadgeTone::Neutral),
-                        ),
-                )
-                .child(
-                    div().flex().items_center().gap(px(space::SM)).child(
-                        Button::new("shuffle-liked", "Перемешать")
-                            .variant(ButtonVariant::Ghost)
-                            .size(ButtonSize::Small)
-                            .icon(icons::SHUFFLE)
-                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.play_random(cx);
-                            })),
+            div().flex().items_center().justify_between().child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(space::MD))
+                    .child(section_title(theme, "Треки"))
+                    .child(
+                        Badge::new(format::plural(
+                            profile.total_liked as u64,
+                            "трек",
+                            "трека",
+                            "треков",
+                        ))
+                        .tone(BadgeTone::Neutral),
                     ),
-                ),
+            ),
         );
 
         if profile.sample.is_empty() {
@@ -2594,6 +2770,7 @@ fn screen_title(screen: &Screen) -> &'static str {
         Screen::Login => "Вход",
         Screen::Loading => "Загрузка",
         Screen::Profile => "Профиль",
+        Screen::Liked => "Любимые",
         Screen::Search => "Поиск",
         Screen::Playlists | Screen::Playlist => "Плейлисты",
         Screen::LoadError(_) => "Ошибка",

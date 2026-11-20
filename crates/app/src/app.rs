@@ -35,6 +35,7 @@ pub(crate) enum Screen {
     Login,
     Loading,
     Profile,
+    Liked,
     Search,
     Playlists,
     Playlist,
@@ -740,7 +741,20 @@ impl RootView {
     }
 
     pub(crate) fn open_profile(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
         self.screen = Screen::Profile;
+        self.queue_open = false;
+        cx.notify();
+    }
+
+    pub(crate) fn open_liked(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.screen = Screen::Liked;
+        self.queue_open = false;
         cx.notify();
     }
 
