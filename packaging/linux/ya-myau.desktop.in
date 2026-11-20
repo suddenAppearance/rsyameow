@@ -14,4 +14,4 @@ Categories=AudioVideo;Audio;Player;
 Keywords=music;yandex;player;
 Keywords[ru]=музыка;яндекс;плеер;
 StartupNotify=true
-StartupWMClass=rsyameow
+StartupWMClass=ya-myau

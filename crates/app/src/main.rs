@@ -159,7 +159,7 @@ fn main() {
                 is_movable: true,
                 is_resizable: true,
                 is_minimizable: true,
-                app_id: Some("rsyameow".to_string()),
+                app_id: Some("ya-myau".to_string()),
                 ..Default::default()
             };
 

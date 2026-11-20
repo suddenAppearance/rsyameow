@@ -326,6 +326,7 @@ impl RootView {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        window.set_window_title("Я.Мяу — Яндекс Музыка");
         let client = match &token {
             Some(token) => Client::with_token(token.clone()),
             None => Client::unauthenticated(),
