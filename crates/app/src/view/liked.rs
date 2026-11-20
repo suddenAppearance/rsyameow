@@ -49,12 +49,10 @@ impl RootView {
                             .size(38.0)
                             .icon_size(16.0)
                             .variant(ButtonVariant::Secondary)
+                            .loading(self.liked_reloading)
+                            .disabled(self.liked_reloading)
                             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                if this.demo {
-                                    this.start_demo(cx);
-                                } else {
-                                    this.retry_profile(cx);
-                                }
+                                this.reload_liked(cx);
                             })),
                     )
                     .child(
@@ -87,6 +85,9 @@ impl RootView {
                         .flex_col()
                         .gap(px(space::LG))
                         .child(header)
+                        .when_some(self.liked_error.clone(), |element, error| {
+                            element.child(error_banner(theme, &error))
+                        })
                         .child(self.liked_section(theme, cx)),
                 ),
             )
@@ -227,11 +228,13 @@ impl RootView {
                             ),
                     )
                     .child(
-                        Button::new("refresh-empty", "Обновить профиль")
+                        Button::new("refresh-empty", "Обновить коллекцию")
                             .variant(ButtonVariant::Secondary)
                             .icon(icons::REFRESH)
+                            .loading(self.liked_reloading)
+                            .disabled(self.liked_reloading)
                             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.retry_profile(cx);
+                                this.reload_liked(cx);
                             })),
                     ),
             );

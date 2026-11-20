@@ -57,6 +57,7 @@ impl RootView {
         let accent = theme.colors.accent;
         let secondary = theme.colors.text_secondary;
         let hover_bg = theme.colors.surface_hover;
+        let collapsed = self.sidebar_collapsed;
 
         let nav_liked = div()
             .id("nav-liked")
@@ -64,8 +65,9 @@ impl RootView {
             .items_center()
             .gap(px(space::MD))
             .h(px(42.0))
-            .px(px(space::MD))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
             .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -82,7 +84,7 @@ impl RootView {
             } else {
                 secondary
             }))
-            .child("Любимые")
+            .when(!collapsed, |element| element.child("Любимые"))
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_liked(cx)));
 
         let nav_now = div()
@@ -91,8 +93,9 @@ impl RootView {
             .items_center()
             .gap(px(space::MD))
             .h(px(42.0))
-            .px(px(space::MD))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
             .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -109,7 +112,7 @@ impl RootView {
             } else {
                 secondary
             }))
-            .child("Сейчас играет")
+            .when(!collapsed, |element| element.child("Сейчас играет"))
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.open_now_playing(cx);
             }));
@@ -120,8 +123,9 @@ impl RootView {
             .items_center()
             .gap(px(space::MD))
             .h(px(42.0))
-            .px(px(space::MD))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
             .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -138,7 +142,7 @@ impl RootView {
             } else {
                 secondary
             }))
-            .child("Моя волна")
+            .when(!collapsed, |element| element.child("Моя волна"))
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.open_wave(cx);
             }));
@@ -149,8 +153,9 @@ impl RootView {
             .items_center()
             .gap(px(space::MD))
             .h(px(42.0))
-            .px(px(space::MD))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
             .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -167,7 +172,7 @@ impl RootView {
             } else {
                 secondary
             }))
-            .child("Поиск")
+            .when(!collapsed, |element| element.child("Поиск"))
             .on_click(
                 cx.listener(|this, _: &gpui::ClickEvent, window, cx| this.open_search(window, cx)),
             );
@@ -178,8 +183,9 @@ impl RootView {
             .items_center()
             .gap(px(space::MD))
             .h(px(42.0))
-            .px(px(space::MD))
+            .px(px(if collapsed { 0.0 } else { space::MD }))
             .rounded(px(10.0))
+            .when(collapsed, |element| element.justify_center())
             .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -196,7 +202,7 @@ impl RootView {
                     .size(17.0)
                     .color(if playlists_active { accent } else { secondary }),
             )
-            .child("Плейлисты")
+            .when(!collapsed, |element| element.child("Плейлисты"))
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.open_playlists(cx);
             }));
@@ -208,6 +214,7 @@ impl RootView {
             .gap(px(space::SM))
             .flex_1()
             .min_w(px(0.0))
+            .when(collapsed, |element| element.justify_center())
             .rounded(px(8.0))
             .cursor_pointer()
             .hover(|style| style.bg(theme.colors.surface_hover))
@@ -215,42 +222,44 @@ impl RootView {
                 this.open_profile(cx);
             }))
             .child(Avatar::new(name.clone()).size(34.0).ring(true))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .gap(px(1.0))
-                    .child(
-                        div()
-                            .text_size(px(text::SM))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(name.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(text::XS))
-                            .text_color(theme.colors.text_muted)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(if login.is_empty() {
-                                "демо-режим".to_string()
-                            } else {
-                                login.clone()
-                            }),
-                    ),
-            );
+            .when(!collapsed, |element| {
+                element.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .gap(px(1.0))
+                        .child(
+                            div()
+                                .text_size(px(text::SM))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(text::XS))
+                                .text_color(theme.colors.text_muted)
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(if login.is_empty() {
+                                    "демо-режим".to_string()
+                                } else {
+                                    login.clone()
+                                }),
+                        ),
+                )
+            });
 
         let account_card = div()
             .flex()
             .items_center()
             .gap(px(space::SM))
-            .p(px(space::SM))
+            .p(px(if collapsed { 6.0 } else { space::SM }))
             .rounded(px(12.0))
             .bg(theme.colors.surface)
             .border_1()
@@ -259,30 +268,65 @@ impl RootView {
             } else {
                 theme.colors.border
             })
+            .when(collapsed, |element| element.justify_center())
             .child(profile_zone)
-            .child(
-                IconButton::new("sidebar-logout", icons::LOGOUT)
-                    .size(30.0)
-                    .icon_size(14.0)
-                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                        this.logout(cx);
-                    })),
-            );
+            .when(!collapsed, |element| {
+                element.child(
+                    IconButton::new("sidebar-logout", icons::LOGOUT)
+                        .size(30.0)
+                        .icon_size(14.0)
+                        .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                            this.logout(cx);
+                        })),
+                )
+            });
+
+        let toggle = IconButton::new(
+            "sidebar-toggle",
+            if collapsed {
+                icons::CHEVRON_RIGHT
+            } else {
+                icons::CHEVRON_LEFT
+            },
+        )
+        .size(28.0)
+        .icon_size(14.0)
+        .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+            this.toggle_sidebar(cx);
+        }));
+
+        let header = if collapsed {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(space::SM))
+                .child(brand_mark(theme, 36.0))
+                .child(toggle)
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .w_full()
+                .child(brand(theme, false))
+                .child(toggle)
+        };
 
         let mut sidebar = div()
-            .w(px(244.0))
+            .w(px(if collapsed { 76.0 } else { 244.0 }))
             .h_full()
             .flex_shrink_0()
             .flex()
             .flex_col()
-            .gap(px(space::LG))
-            .p(px(space::LG))
+            .gap(px(if collapsed { 12.0 } else { space::LG }))
+            .p(px(if collapsed { 12.0 } else { space::LG }))
             .bg(theme.colors.sidebar)
             .border_r_1()
             .border_color(theme.colors.border)
-            .child(brand(theme, false));
+            .child(header);
 
-        if self.demo {
+        if self.demo && !collapsed {
             sidebar = sidebar.child(
                 div()
                     .flex()
@@ -297,7 +341,9 @@ impl RootView {
                     .flex()
                     .flex_col()
                     .gap(px(space::XS))
-                    .child(section_label(theme, "МЕНЮ"))
+                    .when(!collapsed, |element| {
+                        element.child(section_label(theme, "МЕНЮ"))
+                    })
                     .child(nav_liked)
                     .child(nav_wave)
                     .child(nav_now)
@@ -311,20 +357,28 @@ impl RootView {
                     .flex_col()
                     .gap(px(space::SM))
                     .child(account_card)
-                    .child(
-                        div()
-                            .px(px(space::SM))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .text_size(px(10.0))
-                            .text_color(theme.colors.text_muted)
-                            .child("rsyameow 0.1.0")
-                            .child("gpui"),
-                    ),
+                    .when(!collapsed, |element| {
+                        element.child(
+                            div()
+                                .px(px(space::SM))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .text_size(px(10.0))
+                                .text_color(theme.colors.text_muted)
+                                .child("rsyameow 0.1.0")
+                                .child("gpui"),
+                        )
+                    }),
             );
 
         sidebar.into_any_element()
+    }
+
+    pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.schedule_state_save(cx);
+        cx.notify();
     }
 
     pub(crate) fn player_bar(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {

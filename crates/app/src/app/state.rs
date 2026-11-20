@@ -52,6 +52,7 @@ impl RootView {
             position_ms: self.player.position.as_millis().min(u64::MAX as u128) as u64,
             quality: self.player.quality.clone(),
             queue_open: self.queue_open,
+            sidebar_collapsed: self.sidebar_collapsed,
             queue_source: self.queue_source.key().to_string(),
             playlist_id: self
                 .playlists
@@ -157,6 +158,7 @@ impl RootView {
         }
 
         self.queue_open = state.queue_open && !self.queue.is_empty();
+        self.sidebar_collapsed = state.sidebar_collapsed;
 
         let restored_position = Duration::from_millis(state.position_ms);
         let track_id = state.track_id.clone();

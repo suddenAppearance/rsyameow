@@ -61,6 +61,8 @@ pub struct AppState {
     #[serde(default)]
     pub queue_open: bool,
     #[serde(default)]
+    pub sidebar_collapsed: bool,
+    #[serde(default)]
     pub queue_source: String,
     #[serde(default)]
     pub playlist_id: Option<String>,

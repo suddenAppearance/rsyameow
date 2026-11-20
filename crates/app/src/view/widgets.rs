@@ -289,6 +289,22 @@ pub(crate) fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, gl
 
 // ------------------------------------------------------------------ Helpers
 
+pub(crate) fn brand_mark(theme: &Theme, mark_size: f32) -> Div {
+    div()
+        .size(px(mark_size))
+        .rounded(px(mark_size * 0.3))
+        .bg(theme.colors.accent)
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_shrink_0()
+        .child(
+            Icon::new(icons::PAW)
+                .size(mark_size * 0.58)
+                .color(theme.colors.accent_text),
+        )
+}
+
 pub(crate) fn brand(theme: &Theme, large: bool) -> Div {
     let mark_size = if large { 44.0 } else { 36.0 };
     let title_size = if large { text::XL } else { text::LG };
@@ -297,38 +313,14 @@ pub(crate) fn brand(theme: &Theme, large: bool) -> Div {
         .flex()
         .items_center()
         .gap(px(space::MD))
+        .child(brand_mark(theme, mark_size))
         .child(
             div()
-                .size(px(mark_size))
-                .rounded(px(mark_size * 0.3))
-                .bg(theme.colors.accent)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    Icon::new(icons::PAW)
-                        .size(mark_size * 0.58)
-                        .color(theme.colors.accent_text),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(1.0))
-                .child(
-                    div()
-                        .text_size(px(title_size))
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .line_height(px(title_size + 2.0))
-                        .child("Я.Мяу"),
-                )
-                .child(
-                    div()
-                        .text_size(px(9.5))
-                        .text_color(theme.colors.text_muted)
-                        .child("YANDEX MUSIC CLIENT"),
-                ),
+                .text_size(px(title_size))
+                .font_weight(gpui::FontWeight::BOLD)
+                .line_height(px(title_size + 2.0))
+                .whitespace_nowrap()
+                .child("Я.Мяу"),
         )
 }
 

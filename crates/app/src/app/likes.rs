@@ -24,6 +24,89 @@ impl RootView {
         self.is_track_liked(track)
     }
 
+    /// Refresh only the liked collection, keeping the current screen and
+    /// playback session intact.
+    pub(crate) fn reload_liked(&mut self, cx: &mut Context<Self>) {
+        if self.liked_reloading {
+            return;
+        }
+        if self.profile.is_none() {
+            return;
+        }
+
+        if self.demo {
+            let tracks = demo::tracks();
+            if let Some(profile) = self.profile.as_mut() {
+                profile.liked = demo::liked(&tracks);
+                profile.total_liked = 248;
+                profile.sample = tracks.clone();
+            }
+            self.liked_error = None;
+            self.load_covers(tracks, cx);
+            cx.notify();
+            return;
+        }
+
+        if self.client.token().is_none() {
+            self.liked_error = Some("Нужно войти в аккаунт.".into());
+            cx.notify();
+            return;
+        }
+
+        self.liked_reloading = true;
+        self.liked_error = None;
+        self.liked_reload_epoch = self.liked_reload_epoch.wrapping_add(1);
+        let request = self.liked_reload_epoch;
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let liked = client.liked_tracks()?;
+                    let ids: Vec<String> = liked
+                        .tracks
+                        .iter()
+                        .take(24)
+                        .map(TrackShort::track_id)
+                        .collect();
+                    let sample = if ids.is_empty() {
+                        Vec::new()
+                    } else {
+                        client.tracks(ids)?
+                    };
+                    Ok::<_, MusicError>((liked, sample))
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.profile_epoch != epoch || this.liked_reload_epoch != request {
+                    return;
+                }
+                this.liked_reloading = false;
+                match result {
+                    Ok((liked, sample)) => {
+                        let total = liked.tracks.len();
+                        if let Some(profile) = this.profile.as_mut() {
+                            profile.liked = liked.tracks;
+                            profile.total_liked = total;
+                            profile.sample = sample.clone();
+                        }
+                        this.liked_error = None;
+                        this.load_covers(sample, cx);
+                    }
+                    Err(error) => {
+                        this.liked_error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn toggle_like(&mut self, cx: &mut Context<Self>) {
         let Some(track) = self.player.track.clone() else {
             return;
