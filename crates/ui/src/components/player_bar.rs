@@ -32,6 +32,7 @@ pub struct PlayerBar {
     on_like: Option<ClickHandler>,
     on_queue: Option<ClickHandler>,
     on_track: Option<ClickHandler>,
+    on_artist: Option<ClickHandler>,
     on_mute: Option<ClickHandler>,
     on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
@@ -61,6 +62,7 @@ impl PlayerBar {
             on_like: None,
             on_queue: None,
             on_track: None,
+            on_artist: None,
             on_mute: None,
             on_volume: None,
             on_toggle: None,
@@ -159,6 +161,14 @@ impl PlayerBar {
         self
     }
 
+    pub fn on_artist(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_artist = Some(Box::new(handler));
+        self
+    }
+
     pub fn on_track(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -217,7 +227,7 @@ impl Default for PlayerBar {
 }
 
 impl RenderOnce for PlayerBar {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::get(cx);
         let has_track = !self.title.is_empty();
 
@@ -278,6 +288,11 @@ impl RenderOnce for PlayerBar {
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_ellipsis()
+                            .border_b_1()
+                            .border_color(gpui::transparent_black())
+                            .group_hover("player-track-info", |style| {
+                                style.border_color(theme.colors.accent)
+                            })
                             .child(title),
                     )
                     .when(self.explicit, |element| {
@@ -305,7 +320,27 @@ impl RenderOnce for PlayerBar {
                                 .color(theme.colors.danger),
                         )
                     })
-                    .child(subtitle),
+                    .child({
+                        let mut artist = gpui::div().id("player-artist").child(subtitle);
+                        if has_track
+                            && self.error.is_none()
+                            && let Some(handler) = self.on_artist.take()
+                        {
+                            artist = artist
+                                .border_b_1()
+                                .border_color(gpui::transparent_black())
+                                .cursor_pointer()
+                                .group_hover("player-track-info", |style| {
+                                    style.border_color(theme.colors.accent)
+                                })
+                                .hover(|style| style.border_color(theme.colors.accent))
+                                .on_click(move |event, window, cx| {
+                                    cx.stop_propagation();
+                                    handler(event, window, cx);
+                                });
+                        }
+                        artist
+                    }),
             );
 
         if self.loading {
@@ -323,6 +358,7 @@ impl RenderOnce for PlayerBar {
 
         let mut left = gpui::div()
             .id("player-track-info")
+            .group("player-track-info")
             .flex()
             .items_center()
             .gap(px(space::MD))
@@ -422,6 +458,7 @@ impl RenderOnce for PlayerBar {
             .flex()
             .items_center()
             .gap(px(space::SM))
+            .child(gpui::div().w(px(76.0)).flex_shrink_0())
             .child(previous)
             .child(toggle)
             .child(next)

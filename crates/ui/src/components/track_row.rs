@@ -19,7 +19,7 @@ pub struct TrackRow {
     current: bool,
     playing: bool,
     explicit: bool,
-    phase: u8,
+    phase: u64,
     on_play: Option<ClickHandler>,
     on_title: Option<ClickHandler>,
     on_artist: Option<ClickHandler>,
@@ -66,7 +66,7 @@ impl TrackRow {
         self
     }
 
-    pub fn animation_phase(mut self, phase: u8) -> Self {
+    pub fn animation_phase(mut self, phase: u64) -> Self {
         self.phase = phase;
         self
     }
@@ -244,7 +244,13 @@ impl RenderOnce for TrackRow {
                             .whitespace_nowrap()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .hover(|style| style.text_color(theme.colors.accent))
+                            .border_b_1()
+                            .border_color(gpui::transparent_black())
+                            .hover(|style| {
+                                style
+                                    .text_color(theme.colors.accent)
+                                    .border_color(theme.colors.accent)
+                            })
                             .child(self.title);
                         if let Some(handler) = self.on_title {
                             title = title.on_click(move |event, window, cx| {
@@ -268,19 +274,36 @@ impl RenderOnce for TrackRow {
                             })
                     })
                     .child({
+                        let group = SharedString::from(format!(
+                            "track-artist-hover-{}-{}",
+                            self.index, self.artist
+                        ));
                         let mut artist = gpui::div()
                             .id(ElementId::Name(SharedString::from(format!(
                                 "track-artist-{}-{}",
                                 self.index, self.artist
                             ))))
+                            .group(group.clone())
+                            .w_full()
                             .cursor_pointer()
-                            .text_size(px(text::SM))
-                            .text_color(theme.colors.text_muted)
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .hover(|style| style.text_color(theme.colors.accent))
-                            .child(self.artist);
+                            .child(
+                                gpui::div().flex().child(
+                                    gpui::div()
+                                        .border_b_1()
+                                        .border_color(gpui::transparent_black())
+                                        .text_size(px(text::SM))
+                                        .text_color(theme.colors.text_muted)
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .group_hover(group, |style| {
+                                            style
+                                                .text_color(theme.colors.accent)
+                                                .border_color(theme.colors.accent)
+                                        })
+                                        .child(self.artist),
+                                ),
+                            );
                         if let Some(handler) = self.on_artist {
                             artist = artist.on_click(move |event, window, cx| {
                                 cx.stop_propagation();

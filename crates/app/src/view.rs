@@ -6,13 +6,14 @@ use crate::app::{
 };
 use crate::format;
 use gpui::{
-    AnyElement, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla, Image, ImageSource,
-    IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba, SharedString, Stateful, Window,
-    div, img, linear_color_stop, linear_gradient, prelude::*, px, relative, rgba,
+    AnyElement, BorderStyle, Bounds, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla,
+    Image, ImageSource, IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba,
+    SharedString, Stateful, Window, canvas, div, img, linear_color_stop, linear_gradient, point,
+    prelude::*, px, quad, relative, rgba, size,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
-    ProgressBar, Spinner, Stat, Theme, TrackRow, icons, space, text,
+    Slider, Spinner, Stat, Theme, TrackRow, icons, space, text,
 };
 use std::sync::Arc;
 use yandex_music::{Playlist, Status, Track};
@@ -676,35 +677,49 @@ impl RootView {
                     if let Some(track) = track.clone() {
                         title_element = title_element
                             .cursor_pointer()
-                            .hover(|style| style.text_color(theme.colors.accent))
+                            .hover(|style| style.text_color(theme.colors.accent).underline())
                             .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 this.open_track_from_queue(track.clone(), cx);
                             }));
                     }
 
+                    let artist_group = SharedString::from(format!("queue-artist-hover-{index}"));
                     let mut artist_element = div()
                         .id(ElementId::Name(SharedString::from(format!(
                             "queue-artist-{index}"
                         ))))
-                        .text_size(px(text::XS))
-                        .text_color(theme.colors.text_muted)
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .child(artist);
+                        .group(artist_group.clone())
+                        .w_full()
+                        .child(
+                            div().flex().child(
+                                div()
+                                    .border_b_1()
+                                    .border_color(gpui::transparent_black())
+                                    .text_size(px(text::XS))
+                                    .text_color(theme.colors.text_muted)
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .group_hover(artist_group, |style| {
+                                        style
+                                            .text_color(theme.colors.accent)
+                                            .border_color(theme.colors.accent)
+                                    })
+                                    .child(artist),
+                            ),
+                        );
                     if let Some(artist) = track
                         .as_ref()
                         .and_then(|track| track.artists.first().cloned())
                         && let Some(artist_id) = artist.id
                     {
-                        artist_element = artist_element
-                            .cursor_pointer()
-                            .hover(|style| style.text_color(theme.colors.accent))
-                            .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+                        artist_element = artist_element.cursor_pointer().on_click(cx.listener(
+                            move |this, _: &gpui::ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 this.open_artist(artist_id, Some(artist.clone()), cx);
-                            }));
+                            },
+                        ));
                     }
 
                     div()
@@ -1814,25 +1829,12 @@ impl RootView {
 
         let mut search_card = card(theme)
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(space::SM))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(self.search_input.clone()),
-                    )
-                    .child(
-                        Button::new("search-submit", "Найти")
-                            .variant(ButtonVariant::Primary)
-                            .icon(icons::SEARCH)
-                            .loading(loading)
-                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                                this.perform_search(cx);
-                            })),
-                    ),
+                div().flex().items_center().gap(px(space::SM)).child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(self.search_input.clone()),
+                ),
             )
             .child(
                 div()
@@ -1891,7 +1893,7 @@ impl RootView {
             let (title, detail) = match kind {
                 SearchKind::Tracks => (
                     "Что будем слушать?",
-                    "Введите название трека, исполнителя или альбома — и нажмите «Найти».",
+                    "Введите название трека, исполнителя или альбома — поиск начнётся автоматически.",
                 ),
                 SearchKind::Artists => (
                     "Найдите исполнителя",
@@ -3278,7 +3280,16 @@ impl RootView {
                             .flex()
                             .flex_col()
                             .gap(px(space::XS))
-                            .child(ProgressBar::new(progress).height(4.0))
+                            .child({
+                                let view = cx.entity();
+                                Slider::new(progress).width(420.0).on_change(
+                                    move |fraction, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.seek_to(fraction, cx);
+                                        });
+                                    },
+                                )
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -3295,6 +3306,7 @@ impl RootView {
                             .items_center()
                             .gap(px(space::MD))
                             .pt(px(space::SM))
+                            .child(div().w(px(44.0)).flex_shrink_0())
                             .child(
                                 IconButton::new("wave-previous", icons::PREVIOUS)
                                     .size(44.0)
@@ -4283,6 +4295,9 @@ impl RootView {
             .map(|track| format::duration_or_dash(track.duration()))
             .unwrap_or_else(|| "0:00".into());
         let elapsed = format::duration(self.player.position);
+        let artist_link = track
+            .as_ref()
+            .and_then(|track| track.artists.first().cloned());
 
         let view = cx.entity();
         let volume_view = cx.entity();
@@ -4312,6 +4327,13 @@ impl RootView {
             }))
             .on_track(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.open_track_page(cx);
+            }))
+            .on_artist(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
+                if let Some(artist) = artist_link.clone()
+                    && let Some(id) = artist.id
+                {
+                    this.open_artist(id, Some(artist), cx);
+                }
             }))
             .on_mute(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.toggle_mute(cx);
@@ -4631,10 +4653,10 @@ fn glass_card(theme: &Theme) -> Div {
 fn immersive_background(
     palette: (Rgba, Rgba),
     backdrop: Option<Arc<Image>>,
-    phase: u8,
+    phase: u64,
 ) -> AnyElement {
     let (base, glow) = palette;
-    let angle = 110.0 + (phase as f32 * 3.0) % 360.0;
+    let angle = 110.0 + (phase as f32 * 0.24) % 360.0;
     let base_hsla: Hsla = base.into();
     let glow_hsla: Hsla = glow.into();
 
@@ -4653,7 +4675,7 @@ fn immersive_background(
                 .left(px(0.0))
                 .size_full()
                 .object_fit(ObjectFit::Cover)
-                .opacity(0.78),
+                .opacity(0.46),
         );
     }
 
@@ -4666,8 +4688,8 @@ fn immersive_background(
                 .size_full()
                 .bg(linear_gradient(
                     angle,
-                    linear_color_stop(glow_hsla.opacity(0.80), 0.0),
-                    linear_color_stop(base_hsla.opacity(0.12), 1.0),
+                    linear_color_stop(glow_hsla.opacity(0.42), 0.0),
+                    linear_color_stop(base_hsla.opacity(0.0), 1.0),
                 )),
         )
         .child(
@@ -4678,9 +4700,21 @@ fn immersive_background(
                 .size_full()
                 .bg(linear_gradient(
                     (angle + 140.0) % 360.0,
-                    linear_color_stop(base_hsla.opacity(0.78), 0.0),
-                    linear_color_stop(glow_hsla.opacity(0.18), 1.0),
+                    linear_color_stop(base_hsla.opacity(0.68), 0.0),
+                    linear_color_stop(glow_hsla.opacity(0.2), 1.0),
                 )),
+        )
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    paint_liquid(window, bounds, glow_hsla, phase);
+                },
+            )
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .size_full(),
         )
         .child(
             div()
@@ -4688,9 +4722,71 @@ fn immersive_background(
                 .top(px(0.0))
                 .left(px(0.0))
                 .size_full()
-                .bg(rgba(0x05050559)),
+                .bg(rgba(0x05050540)),
         )
         .into_any_element()
+}
+
+fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla, phase: u64) {
+    let width = f32::from(bounds.size.width);
+    let height = f32::from(bounds.size.height);
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    let phase = phase as f32;
+    let colors = [
+        Hsla {
+            h: glow.h,
+            s: 0.88,
+            l: 0.58,
+            a: 0.024,
+        },
+        Hsla {
+            h: (glow.h + 0.18) % 1.0,
+            s: 0.82,
+            l: 0.54,
+            a: 0.021,
+        },
+        Hsla {
+            h: (glow.h + 0.72) % 1.0,
+            s: 0.78,
+            l: 0.5,
+            a: 0.021,
+        },
+        Hsla {
+            h: (glow.h + 0.42) % 1.0,
+            s: 0.7,
+            l: 0.7,
+            a: 0.017,
+        },
+    ];
+
+    for (index, color) in colors.into_iter().enumerate() {
+        let offset = index as f32 * 1.83;
+        let drift = phase * 0.026;
+        let center_x =
+            f32::from(bounds.origin.x) + width * (0.5 + 0.34 * (drift * 0.7 + offset).sin());
+        let center_y = f32::from(bounds.origin.y)
+            + height * (0.5 + 0.3 * (drift * 0.55 + offset * 1.31).cos());
+        let radius = width.min(height) * (0.3 + 0.06 * (drift * 0.8 + offset * 0.9).sin());
+
+        for ring in (0..22).rev() {
+            let progress = (ring + 1) as f32 / 22.0;
+            let ring_radius = radius * progress;
+            let blob = Bounds {
+                origin: point(px(center_x - ring_radius), px(center_y - ring_radius)),
+                size: size(px(ring_radius * 2.0), px(ring_radius * 2.0)),
+            };
+            window.paint_quad(quad(
+                blob,
+                px(ring_radius),
+                color,
+                px(0.0),
+                gpui::transparent_black(),
+                BorderStyle::default(),
+            ));
+        }
+    }
 }
 
 // ------------------------------------------------------------------ Helpers

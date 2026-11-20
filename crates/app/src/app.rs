@@ -220,6 +220,7 @@ pub struct RootView {
     pub(crate) search_input: Entity<TextInput>,
     pub(crate) search: SearchState,
     pub(crate) search_epoch: u64,
+    search_debounce_epoch: u64,
     pub(crate) playlists: PlaylistsState,
     pub(crate) playlist_covers: HashMap<String, Arc<Image>>,
     pub(crate) artist: ArtistState,
@@ -235,7 +236,7 @@ pub struct RootView {
     pub(crate) track_backdrops: HashMap<String, Arc<Image>>,
     backdrop_loading: HashSet<String>,
     pub(crate) queue_source: QueueSource,
-    pub(crate) animation_phase: u8,
+    pub(crate) animation_phase: u64,
     pub(crate) nav_stack: Vec<Screen>,
     pub(crate) search_images: HashMap<String, Arc<Image>>,
     pub(crate) show_token_input: bool,
@@ -266,6 +267,7 @@ pub struct RootView {
     _token_subscription: Subscription,
     _search_subscription: Subscription,
     _ticker: Task<()>,
+    _animation_ticker: Task<()>,
 }
 
 impl RootView {
@@ -295,14 +297,16 @@ impl RootView {
                 .placeholder("Трек, исполнитель или альбом")
                 .monospace(false)
         });
-        let search_subscription =
-            cx.subscribe(&search_input, |this, _input, event: &TextInputEvent, cx| {
-                if let TextInputEvent::Submit(_) = event {
-                    this.perform_search(cx);
-                }
-            });
+        let search_subscription = cx.subscribe(
+            &search_input,
+            |this, _input, event: &TextInputEvent, cx| match event {
+                TextInputEvent::Changed(text) => this.schedule_search(text.clone(), cx),
+                TextInputEvent::Submit(_) => this.perform_search(cx),
+            },
+        );
 
         let ticker = Self::spawn_ticker(cx);
+        let animation_ticker = Self::spawn_animation_ticker(cx);
         let focus_handle = cx.focus_handle();
         let viewport = window.viewport_size();
         let volume = config::load_volume().unwrap_or(0.85);
@@ -317,6 +321,7 @@ impl RootView {
             search_input,
             search: SearchState::default(),
             search_epoch: 0,
+            search_debounce_epoch: 0,
             playlists: PlaylistsState::default(),
             playlist_covers: HashMap::new(),
             artist: ArtistState::default(),
@@ -363,6 +368,7 @@ impl RootView {
             _token_subscription: token_subscription,
             _search_subscription: search_subscription,
             _ticker: ticker,
+            _animation_ticker: animation_ticker,
         };
 
         if demo_mode {
@@ -396,6 +402,23 @@ impl RootView {
 
     /// A background task that advances the progress bar and detects the end of
     /// a track. Demo playback is simulated; real playback asks rodio.
+    fn spawn_animation_ticker(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            loop {
+                Timer::after(Duration::from_millis(33)).await;
+                let updated = this.update(cx, |this, cx| {
+                    if matches!(this.screen, Screen::Track | Screen::Wave) {
+                        this.animation_phase = this.animation_phase.wrapping_add(1);
+                        cx.notify();
+                    }
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
     fn spawn_ticker(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
@@ -403,11 +426,8 @@ impl RootView {
 
                 let updated = this.update(cx, |this, cx| {
                     let immersive = matches!(this.screen, Screen::Track | Screen::Wave);
-                    if immersive || this.player.playing {
+                    if !immersive && this.player.playing {
                         this.animation_phase = this.animation_phase.wrapping_add(1);
-                    }
-                    if immersive {
-                        cx.notify();
                     }
                     if !this.player.playing || this.player.loading {
                         return;
@@ -956,7 +976,42 @@ impl RootView {
         cx.notify();
     }
 
+    fn schedule_search(&mut self, query: String, cx: &mut Context<Self>) {
+        self.search_debounce_epoch = self.search_debounce_epoch.wrapping_add(1);
+        let epoch = self.search_debounce_epoch;
+        let query = query.trim().to_string();
+
+        if query.is_empty() {
+            self.search_epoch = self.search_epoch.wrapping_add(1);
+            self.search.query.clear();
+            self.search.searched = false;
+            self.search.loading = false;
+            self.search.error = None;
+            self.search.results.clear();
+            self.search.artists.clear();
+            self.search.albums.clear();
+            self.search.total = 0;
+            self.search.page = 0;
+            self.search.per_page = 0;
+            cx.notify();
+            return;
+        }
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            Timer::after(Duration::from_millis(400)).await;
+            this.update(cx, |this, cx| {
+                if this.search_debounce_epoch != epoch {
+                    return;
+                }
+                this.run_search(query, 0, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn perform_search(&mut self, cx: &mut Context<Self>) {
+        self.search_debounce_epoch = self.search_debounce_epoch.wrapping_add(1);
         let query = self.search_input.read(cx).text().trim().to_string();
         self.run_search(query, 0, cx);
     }
@@ -1175,6 +1230,7 @@ impl RootView {
             return;
         }
         self.search.kind = kind;
+        self.search_debounce_epoch = self.search_debounce_epoch.wrapping_add(1);
         let query = self.search_input.read(cx).text().trim().to_string();
         let query = if query.is_empty() {
             self.search.query.clone()
