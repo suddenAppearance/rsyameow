@@ -228,10 +228,6 @@ pub struct RootView {
     pub(crate) album: AlbumState,
     pub(crate) wave: WaveState,
     pub(crate) page_track: Option<Track>,
-    now_playing_from: Option<(Rgba, Rgba)>,
-    now_playing_target: Option<(Rgba, Rgba)>,
-    now_playing_track: Option<String>,
-    now_playing_started: Instant,
     pub(crate) page_context: Vec<Track>,
     pub(crate) track_lyrics: HashMap<String, Option<String>>,
     preloaded: HashMap<String, DownloadedTrack>,
@@ -272,7 +268,6 @@ pub struct RootView {
     _token_subscription: Subscription,
     _search_subscription: Subscription,
     _ticker: Task<()>,
-    _animation_ticker: Task<()>,
 }
 
 impl RootView {
@@ -311,7 +306,6 @@ impl RootView {
         );
 
         let ticker = Self::spawn_ticker(cx);
-        let animation_ticker = Self::spawn_animation_ticker(cx);
         let focus_handle = cx.focus_handle();
         let viewport = window.viewport_size();
         let volume = config::load_volume().unwrap_or(0.85);
@@ -333,10 +327,6 @@ impl RootView {
             album: AlbumState::default(),
             wave: WaveState::default(),
             page_track: None,
-            now_playing_from: None,
-            now_playing_target: None,
-            now_playing_track: None,
-            now_playing_started: Instant::now(),
             page_context: Vec::new(),
             track_lyrics: HashMap::new(),
             preloaded: HashMap::new(),
@@ -377,7 +367,6 @@ impl RootView {
             _token_subscription: token_subscription,
             _search_subscription: search_subscription,
             _ticker: ticker,
-            _animation_ticker: animation_ticker,
         };
 
         if demo_mode {
@@ -411,26 +400,6 @@ impl RootView {
 
     /// A background task that advances the progress bar and detects the end of
     /// a track. Demo playback is simulated; real playback asks rodio.
-    fn spawn_animation_ticker(cx: &mut Context<Self>) -> Task<()> {
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            loop {
-                Timer::after(Duration::from_millis(33)).await;
-                let updated = this.update(cx, |this, cx| {
-                    if matches!(
-                        this.screen,
-                        Screen::Track | Screen::NowPlaying | Screen::Wave
-                    ) {
-                        this.animation_phase = this.animation_phase.wrapping_add(1);
-                        cx.notify();
-                    }
-                });
-                if updated.is_err() {
-                    break;
-                }
-            }
-        })
-    }
-
     fn spawn_ticker(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
@@ -692,9 +661,6 @@ impl RootView {
         self.preloaded.clear();
         self.prefetching.clear();
         self.lyrics_loading.clear();
-        self.now_playing_from = None;
-        self.now_playing_target = None;
-        self.now_playing_track = None;
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -732,9 +698,6 @@ impl RootView {
         self.preloaded.clear();
         self.prefetching.clear();
         self.lyrics_loading.clear();
-        self.now_playing_from = None;
-        self.now_playing_target = None;
-        self.now_playing_track = None;
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -916,9 +879,6 @@ impl RootView {
         self.preloaded.clear();
         self.prefetching.clear();
         self.lyrics_loading.clear();
-        self.now_playing_from = None;
-        self.now_playing_target = None;
-        self.now_playing_track = None;
         self.track_palettes.clear();
         self.track_backdrops.clear();
         self.backdrop_loading.clear();
@@ -1892,43 +1852,6 @@ impl RootView {
                 self.prefetch_track(track, cx);
             }
         }
-    }
-
-    /// Smoothly interpolate the now-playing background palette when the
-    /// current track (or its extracted cover palette) changes.
-    pub(crate) fn now_playing_palette(
-        &mut self,
-        track_id: &str,
-        target: (Rgba, Rgba),
-    ) -> (Rgba, Rgba) {
-        let track_changed = self.now_playing_track.as_deref() != Some(track_id);
-        let target_changed = self.now_playing_target != Some(target);
-        if track_changed || target_changed {
-            let current = self.interpolated_now_playing_palette().unwrap_or(target);
-            self.now_playing_from = if self.now_playing_track.is_some() {
-                Some(current)
-            } else {
-                None
-            };
-            self.now_playing_target = Some(target);
-            self.now_playing_track = Some(track_id.to_string());
-            self.now_playing_started = Instant::now();
-        }
-        self.interpolated_now_playing_palette().unwrap_or(target)
-    }
-
-    fn interpolated_now_playing_palette(&self) -> Option<(Rgba, Rgba)> {
-        let target = self.now_playing_target?;
-        let Some(from) = self.now_playing_from else {
-            return Some(target);
-        };
-        let elapsed = self.now_playing_started.elapsed().as_secs_f32();
-        let progress = (elapsed / 0.85).clamp(0.0, 1.0);
-        let eased = progress * progress * (3.0 - 2.0 * progress);
-        Some((
-            lerp_rgba(from.0, target.0, eased),
-            lerp_rgba(from.1, target.1, eased),
-        ))
     }
 
     // ------------------------------------------------------------- Cover mood
@@ -3706,15 +3629,6 @@ fn step_index(current: Option<usize>, len: usize, forward: bool) -> usize {
             }
         }
         _ => 0,
-    }
-}
-
-fn lerp_rgba(from: Rgba, to: Rgba, t: f32) -> Rgba {
-    Rgba {
-        r: from.r + (to.r - from.r) * t,
-        g: from.g + (to.g - from.g) * t,
-        b: from.b + (to.b - from.b) * t,
-        a: 1.0,
     }
 }
 

@@ -2898,12 +2898,7 @@ impl RootView {
                 .into_any_element();
         };
 
-        let target_palette = self.track_palette(&track.id);
-        let palette = if current_only {
-            self.now_playing_palette(&track.id, target_palette)
-        } else {
-            target_palette
-        };
+        let palette = self.track_palette(&track.id);
         if current_only {
             self.load_track_lyrics(track.clone(), cx);
             self.load_track_backdrop(track.clone(), cx);
@@ -3191,11 +3186,7 @@ impl RootView {
             .h_full()
             .overflow_hidden()
             .bg(palette.0)
-            .child(immersive_background(
-                palette,
-                backdrop,
-                self.animation_phase,
-            ))
+            .child(immersive_background(palette, backdrop))
             .child(
                 div()
                     .relative()
@@ -3244,7 +3235,6 @@ impl RootView {
             .and_then(|track| self.track_backdrop(&track.id));
         let loading = self.wave.loading;
         let error = self.wave.error.clone();
-        let phase = self.animation_phase;
 
         let content = if let Some(track) = track {
             let cover = self.player.cover.clone();
@@ -3483,7 +3473,7 @@ impl RootView {
             .h_full()
             .overflow_hidden()
             .bg(palette.0)
-            .child(immersive_background(palette, backdrop, phase))
+            .child(immersive_background(palette, backdrop))
             .child(
                 div()
                     .relative()
@@ -4709,11 +4699,7 @@ fn glass_card(theme: &Theme) -> Div {
         .text_color(theme.colors.white)
 }
 
-fn immersive_background(
-    palette: (Rgba, Rgba),
-    backdrop: Option<Arc<Image>>,
-    phase: u64,
-) -> AnyElement {
+fn immersive_background(palette: (Rgba, Rgba), backdrop: Option<Arc<Image>>) -> AnyElement {
     let (base, glow) = palette;
     let glow_hsla: Hsla = glow.into();
 
@@ -4741,7 +4727,7 @@ fn immersive_background(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
-                    paint_liquid(window, bounds, glow_hsla, phase);
+                    paint_liquid(window, bounds, glow_hsla);
                 },
             )
             .absolute()
@@ -4760,13 +4746,12 @@ fn immersive_background(
         .into_any_element()
 }
 
-fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla, phase: u64) {
+fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla) {
     let width = f32::from(bounds.size.width);
     let height = f32::from(bounds.size.height);
     if width <= 0.0 || height <= 0.0 {
         return;
     }
-    let phase = phase as f32;
     let colors = [
         Hsla {
             h: glow.h,
@@ -4803,14 +4788,13 @@ fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla, p
     let min_side = width.min(height);
     for (index, color) in colors.into_iter().enumerate() {
         let (x, y, radius_factor) = placements[index];
-        let pulse = 0.55 + 0.45 * (phase * 0.018 + index as f32 * 1.9).sin();
         let center_x = f32::from(bounds.origin.x) + width * x;
         let center_y = f32::from(bounds.origin.y) + height * y;
         let radius = min_side * radius_factor;
-        let ring_alpha = 0.006 * pulse;
+        let ring_alpha = 0.0045;
 
-        for ring in (0..80).rev() {
-            let progress = (ring + 1) as f32 / 80.0;
+        for ring in (0..128).rev() {
+            let progress = (ring + 1) as f32 / 128.0;
             let ring_radius = radius * progress;
             let blob = Bounds {
                 origin: point(px(center_x - ring_radius), px(center_y - ring_radius)),
