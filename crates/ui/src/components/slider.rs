@@ -1,10 +1,8 @@
 use crate::theme::Theme;
 use gpui::{
-    App, Bounds, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    RenderOnce, Window, canvas, prelude::*, px, relative,
+    App, Bounds, ElementId, Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, RenderOnce, SharedString, Window, canvas, prelude::*, px, relative,
 };
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 type ChangeHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -17,8 +15,15 @@ type ChangeHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 pub struct Slider {
     value: f32,
     width: f32,
+    id: ElementId,
     on_change: Option<ChangeHandler>,
     on_commit: Option<ChangeHandler>,
+}
+
+#[derive(Default)]
+struct SliderState {
+    dragging: bool,
+    last: f32,
 }
 
 impl Slider {
@@ -26,6 +31,7 @@ impl Slider {
         Self {
             value: value.clamp(0.0, 1.0),
             width: 96.0,
+            id: ElementId::Name(SharedString::from("slider")),
             on_change: None,
             on_commit: None,
         }
@@ -33,6 +39,11 @@ impl Slider {
 
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
         self
     }
 
@@ -48,8 +59,8 @@ impl Slider {
 }
 
 impl RenderOnce for Slider {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = Theme::get(cx);
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::get(cx).clone();
         let value = self.value.clamp(0.0, 1.0);
         let track_bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
         let bounds_for_canvas = track_bounds.clone();
@@ -61,16 +72,14 @@ impl RenderOnce for Slider {
         let commit = self.on_commit;
         let commit_for_up = commit.clone();
         let commit_for_up_out = commit;
-        let dragging = Rc::new(Cell::new(false));
-        let last_value = Rc::new(Cell::new(value));
-        let last_value_for_up = last_value.clone();
-        let last_value_for_up_out = last_value.clone();
-        let dragging_for_down = dragging.clone();
-        let last_value_for_down = last_value.clone();
-        let dragging_for_move = dragging.clone();
-        let last_value_for_move = last_value.clone();
-        let dragging_for_up = dragging.clone();
-        let dragging_for_up_out = dragging;
+        let state: Entity<SliderState> = window.use_keyed_state(self.id, cx, |_, _| SliderState {
+            dragging: false,
+            last: value,
+        });
+        let state_for_down = state.clone();
+        let state_for_move = state.clone();
+        let state_for_up = state.clone();
+        let state_for_up_out = state;
 
         gpui::div()
             .relative()
@@ -98,13 +107,15 @@ impl RenderOnce for Slider {
                     let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x))
                         / width)
                         .clamp(0.0, 1.0);
-                    dragging_for_down.set(true);
-                    last_value_for_down.set(value);
+                    state_for_down.update(cx, |state, _| {
+                        state.dragging = true;
+                        state.last = value;
+                    });
                     handler(value, window, cx);
                 },
             )
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                if !event.dragging() || !dragging_for_move.get() {
+                if !event.dragging() || !state_for_move.read(cx).dragging {
                     return;
                 }
                 let Some(handler) = handler_for_move.as_ref() else {
@@ -122,21 +133,37 @@ impl RenderOnce for Slider {
                 }
                 let value = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
                     .clamp(0.0, 1.0);
-                last_value_for_move.set(value);
+                state_for_move.update(cx, |state, _| state.last = value);
                 handler(value, window, cx);
             })
             .on_mouse_up(MouseButton::Left, move |_: &MouseUpEvent, window, cx| {
-                if dragging_for_up.replace(false)
+                let last = state_for_up.update(cx, |state, _| {
+                    if state.dragging {
+                        state.dragging = false;
+                        Some(state.last)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(value) = last
                     && let Some(handler) = commit_for_up.as_ref()
                 {
-                    handler(last_value_for_up.get(), window, cx);
+                    handler(value, window, cx);
                 }
             })
             .on_mouse_up_out(MouseButton::Left, move |_: &MouseUpEvent, window, cx| {
-                if dragging_for_up_out.replace(false)
+                let last = state_for_up_out.update(cx, |state, _| {
+                    if state.dragging {
+                        state.dragging = false;
+                        Some(state.last)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(value) = last
                     && let Some(handler) = commit_for_up_out.as_ref()
                 {
-                    handler(last_value_for_up_out.get(), window, cx);
+                    handler(value, window, cx);
                 }
             })
             .child(

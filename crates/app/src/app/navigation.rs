@@ -47,6 +47,7 @@ impl RootView {
         }
         self.screen = Screen::Settings;
         self.quality_select_open = false;
+        self.eq_drag = None;
         self.nav_stack.clear();
         self.queue_open = false;
         self.schedule_state_save(cx);

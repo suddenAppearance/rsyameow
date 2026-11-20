@@ -804,7 +804,10 @@ impl RenderOnce for PlayerBar {
             mute = mute.on_click(handler);
         }
 
-        let mut slider = Slider::new(volume).width(if compact { 56.0 } else { 72.0 });
+        let mut slider =
+            Slider::new(volume)
+                .id("volume-slider")
+                .width(if compact { 56.0 } else { 72.0 });
         if let Some(handler) = self.on_volume {
             slider = slider.on_change(handler);
         }

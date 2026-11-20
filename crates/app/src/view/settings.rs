@@ -2,6 +2,21 @@
 
 use super::widgets::*;
 use super::*;
+use std::sync::{Arc, Mutex};
+
+const EQ_ROW_HEIGHT: f32 = 178.0;
+const EQ_VALUE_HEIGHT: f32 = 16.0;
+const EQ_SLIDER_HEIGHT: f32 = 144.0;
+const EQ_TRACK_TOP: f32 = 8.0;
+const EQ_TRACK_HEIGHT: f32 = 128.0;
+const EQ_CURVE_TOP: f32 = EQ_VALUE_HEIGHT + EQ_TRACK_TOP;
+
+fn equalizer_gain_at(y: gpui::Pixels, bounds: Option<&Bounds<gpui::Pixels>>) -> Option<f32> {
+    let bounds = bounds?;
+    let top = f32::from(bounds.origin.y) + EQ_TRACK_TOP;
+    let value = 1.0 - ((f32::from(y) - top) / EQ_TRACK_HEIGHT).clamp(0.0, 1.0);
+    Some(value * 24.0 - 12.0)
+}
 
 fn quality_label(quality: yandex_music::AudioQuality) -> &'static str {
     match quality {
@@ -111,6 +126,7 @@ impl RootView {
                             .border_1()
                             .border_color(theme.colors.border)
                             .overflow_hidden()
+                            .p(px(4.0))
                             .flex()
                             .flex_col();
                         for quality in qualities {
@@ -126,6 +142,7 @@ impl RootView {
                                     .justify_between()
                                     .px(px(space::MD))
                                     .py(px(space::SM))
+                                    .rounded(px(6.0))
                                     .cursor_pointer()
                                     .when(selected, |row| row.bg(theme.colors.accent_soft))
                                     .hover(|style| style.bg(theme.colors.surface_hover))
@@ -205,46 +222,185 @@ impl RootView {
         }
 
         let bands = ["60 Гц", "230 Гц", "910 Гц", "3.6 кГц", "14 кГц"];
-        let mut sliders = div().flex().flex_col().gap(px(2.0));
+        let gains = self.equalizer_gains;
+        let curve_color = theme.colors.accent;
+        let mut columns = div()
+            .relative()
+            .w_full()
+            .h(px(EQ_ROW_HEIGHT))
+            .flex()
+            .items_start()
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        let width = f32::from(bounds.size.width);
+                        let mut points = Vec::with_capacity(5);
+                        for (index, gain) in gains.iter().enumerate() {
+                            let x =
+                                f32::from(bounds.origin.x) + width * ((index as f32 + 0.5) / 5.0);
+                            let y = f32::from(bounds.origin.y)
+                                + EQ_CURVE_TOP
+                                + (1.0 - (gain + 12.0) / 24.0) * EQ_TRACK_HEIGHT;
+                            points.push(point(px(x), px(y)));
+                        }
+                        let mut path = PathBuilder::stroke(px(2.0));
+                        path.move_to(points[0]);
+                        for pair in points.windows(2) {
+                            let from = pair[0];
+                            let to = pair[1];
+                            let mid_x = (f32::from(from.x) + f32::from(to.x)) / 2.0;
+                            path.cubic_bezier_to(
+                                to,
+                                point(px(mid_x), from.y),
+                                point(px(mid_x), to.y),
+                            );
+                        }
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, curve_color);
+                        }
+                    },
+                )
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full(),
+            );
+
         for (index, band) in bands.iter().enumerate() {
             let gain = self.equalizer_gains[index];
             let value = ((gain + 12.0) / 24.0).clamp(0.0, 1.0);
-            let preview_view = cx.entity();
-            let commit_view = cx.entity();
-            sliders = sliders.child(
+            let slider_bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> =
+                Arc::new(Mutex::new(None));
+            let bounds_for_canvas = slider_bounds.clone();
+            let bounds_for_down = slider_bounds.clone();
+            let bounds_for_move = slider_bounds;
+            let down_view = cx.entity();
+            let move_view = cx.entity();
+            let up_view = cx.entity();
+            let up_out_view = cx.entity();
+
+            let knob_top = EQ_TRACK_TOP + (1.0 - value) * EQ_TRACK_HEIGHT - 7.0;
+            let slider = div()
+                .relative()
+                .w(px(48.0))
+                .h(px(EQ_SLIDER_HEIGHT))
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    move |event: &gpui::MouseDownEvent, _, cx| {
+                        let Ok(bounds) = bounds_for_down.lock() else {
+                            return;
+                        };
+                        let Some(gain) = equalizer_gain_at(event.position.y, bounds.as_ref())
+                        else {
+                            return;
+                        };
+                        down_view.update(cx, |this, cx| {
+                            this.begin_equalizer_drag(index, gain, cx);
+                        });
+                    },
+                )
+                .on_mouse_move(move |event: &gpui::MouseMoveEvent, _, cx| {
+                    if !event.dragging() {
+                        return;
+                    }
+                    let Ok(bounds) = bounds_for_move.lock() else {
+                        return;
+                    };
+                    let Some(gain) = equalizer_gain_at(event.position.y, bounds.as_ref()) else {
+                        return;
+                    };
+                    move_view.update(cx, |this, cx| {
+                        this.drag_equalizer(index, gain, cx);
+                    });
+                })
+                .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                    up_view.update(cx, |this, cx| {
+                        this.end_equalizer_drag(index, cx);
+                    });
+                })
+                .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
+                    up_out_view.update(cx, |this, cx| {
+                        this.end_equalizer_drag(index, cx);
+                    });
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(EQ_TRACK_TOP))
+                        .left(px(22.0))
+                        .w(px(4.0))
+                        .h(px(EQ_TRACK_HEIGHT))
+                        .rounded_full()
+                        .bg(theme.colors.border_strong)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .absolute()
+                                .bottom(px(0.0))
+                                .left(px(0.0))
+                                .w_full()
+                                .h(px(value * EQ_TRACK_HEIGHT))
+                                .rounded_full()
+                                .bg(theme.colors.accent),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(EQ_TRACK_TOP + EQ_TRACK_HEIGHT / 2.0))
+                        .left(px(17.0))
+                        .w(px(14.0))
+                        .h(px(1.0))
+                        .bg(theme.colors.border_strong),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(knob_top))
+                        .left(px(17.0))
+                        .size(px(14.0))
+                        .rounded_full()
+                        .bg(theme.colors.accent)
+                        .border_2()
+                        .border_color(theme.colors.surface_active),
+                )
+                .child(
+                    canvas(
+                        move |bounds, _, _| {
+                            if let Ok(mut slot) = bounds_for_canvas.lock() {
+                                *slot = Some(bounds);
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .size_full(),
+                );
+
+            columns = columns.child(
                 div()
+                    .flex_1()
                     .flex()
+                    .flex_col()
                     .items_center()
-                    .gap(px(space::SM))
-                    .h(px(28.0))
                     .child(
                         div()
-                            .w(px(58.0))
+                            .h(px(EQ_VALUE_HEIGHT))
+                            .text_size(px(text::XS))
+                            .text_color(theme.colors.text_secondary)
+                            .child(format!("{gain:+.0}")),
+                    )
+                    .child(slider)
+                    .child(
+                        div()
+                            .h(px(EQ_VALUE_HEIGHT))
                             .text_size(px(text::XS))
                             .text_color(theme.colors.text_muted)
                             .child(*band),
-                    )
-                    .child(
-                        Slider::new(value)
-                            .width(340.0)
-                            .on_change(move |value, _, cx| {
-                                preview_view.update(cx, |this, cx| {
-                                    this.set_equalizer_band(index, value * 24.0 - 12.0, cx);
-                                });
-                            })
-                            .on_commit(move |_, _, cx| {
-                                commit_view.update(cx, |this, cx| {
-                                    this.commit_equalizer(cx);
-                                });
-                            }),
-                    )
-                    .child(
-                        div()
-                            .w(px(52.0))
-                            .text_size(px(text::XS))
-                            .text_color(theme.colors.text_secondary)
-                            .text_right()
-                            .child(format!("{gain:+.0} дБ")),
                     ),
             );
         }
@@ -267,9 +423,9 @@ impl RootView {
                 div()
                     .text_size(px(text::XS))
                     .text_color(theme.colors.text_muted)
-                    .child("Пресеты задают значения; ползунки можно менять отдельно."),
+                    .child("Пресеты задают значения; ползунки в дБ можно менять отдельно."),
             )
-            .child(sliders);
+            .child(columns);
 
         div()
             .flex()

@@ -437,6 +437,24 @@ impl RootView {
         .detach();
     }
 
+    pub(crate) fn begin_equalizer_drag(&mut self, index: usize, gain: f32, cx: &mut Context<Self>) {
+        self.eq_drag = Some(index);
+        self.set_equalizer_band(index, gain, cx);
+    }
+
+    pub(crate) fn drag_equalizer(&mut self, index: usize, gain: f32, cx: &mut Context<Self>) {
+        if self.eq_drag == Some(index) {
+            self.set_equalizer_band(index, gain, cx);
+        }
+    }
+
+    pub(crate) fn end_equalizer_drag(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.eq_drag == Some(index) {
+            self.eq_drag = None;
+            self.commit_equalizer(cx);
+        }
+    }
+
     pub(crate) fn commit_equalizer(&mut self, cx: &mut Context<Self>) {
         self.equalizer_commit_epoch = self.equalizer_commit_epoch.wrapping_add(1);
         self.audio.set_equalizer(self.equalizer_gains);

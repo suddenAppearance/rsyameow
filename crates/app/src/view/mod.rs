@@ -25,13 +25,13 @@ use crate::config;
 use crate::format;
 use gpui::{
     AnyElement, BorderStyle, Bounds, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla,
-    Image, ImageSource, IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba,
+    Image, ImageSource, IntoElement, MouseButton, ObjectFit, PathBuilder, Render, ResizeEdge, Rgba,
     ScrollHandle, SharedString, Stateful, Window, canvas, div, img, linear_color_stop,
     linear_gradient, point, prelude::*, px, quad, relative, rgba, size,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
-    SeekBar, Slider, Spinner, Stat, Theme, TrackRow, icons, space, text,
+    SeekBar, Spinner, Stat, Theme, TrackRow, icons, space, text,
 };
 use std::sync::Arc;
 use yandex_music::{Album, Playlist, Status, Track};
