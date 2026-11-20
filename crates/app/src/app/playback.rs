@@ -233,6 +233,7 @@ impl RootView {
         }
 
         self.audio.stop();
+        self.seek_preview = None;
         self.playback_epoch += 1;
         let epoch = self.playback_epoch;
         let client = self.client.clone();
@@ -383,6 +384,7 @@ impl RootView {
     }
 
     pub(crate) fn seek_to(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        self.seek_preview = None;
         if self.player.loading {
             return;
         }

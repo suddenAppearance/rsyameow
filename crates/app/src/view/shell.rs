@@ -341,12 +341,22 @@ impl RootView {
             .as_ref()
             .map(|track| format::duration_or_dash(track.duration()))
             .unwrap_or_else(|| "0:00".into());
-        let elapsed = format::duration(self.player.position);
+        let seek_preview = self.seek_preview;
+        let progress = seek_preview.unwrap_or_else(|| self.player.progress());
+        let elapsed = if let Some(fraction) = seek_preview {
+            track
+                .as_ref()
+                .map(|track| format::duration(track.duration().mul_f32(fraction)))
+                .unwrap_or_else(|| "0:00".into())
+        } else {
+            format::duration(self.player.position)
+        };
         let artist_link = track
             .as_ref()
             .and_then(|track| track.artists.first().cloned());
 
         let view = cx.entity();
+        let preview_view = cx.entity();
         let volume_view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
@@ -357,7 +367,7 @@ impl RootView {
                     .is_some_and(|track| track.explicit.unwrap_or(false)),
             )
             .cover(self.player.cover.clone())
-            .progress(self.player.progress(), elapsed, duration)
+            .progress(progress, elapsed, duration)
             .playing(self.player.playing)
             .loading(self.player.loading)
             .quality(self.player.quality.clone())
@@ -397,8 +407,18 @@ impl RootView {
             .on_next(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.play_next(cx);
             }))
+            .on_seek_preview(move |fraction, _, cx| {
+                preview_view.update(cx, |this, cx| {
+                    this.seek_preview = Some(fraction);
+                    cx.notify();
+                });
+            })
             .on_seek(move |fraction, _, cx| {
-                view.update(cx, |this, cx| this.seek_to(fraction, cx));
+                view.update(cx, |this, cx| {
+                    if this.seek_preview.is_some() {
+                        this.seek_to(fraction, cx);
+                    }
+                });
             });
 
         let _ = theme;

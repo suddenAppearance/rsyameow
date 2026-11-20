@@ -324,6 +324,7 @@ impl RootView {
         cx: &mut Context<Self>,
     ) {
         self.cache_track(&track);
+        self.seek_preview = None;
         self.lyrics_expanded = false;
         self.player.track = Some(track.clone());
         self.player.cover = self.covers.get(&track.id).cloned();

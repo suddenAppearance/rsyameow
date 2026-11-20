@@ -1,11 +1,11 @@
 use crate::theme::{Theme, icons, space, text};
 use gpui::{
-    App, Bounds, ClickEvent, FontWeight, Image, ImageSource, IntoElement, MouseButton,
-    MouseDownEvent, ObjectFit, RenderOnce, SharedString, Window, canvas, img, prelude::*, px,
+    App, ClickEvent, FontWeight, Image, ImageSource, IntoElement, ObjectFit, RenderOnce,
+    SharedString, Window, img, prelude::*, px,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Slider, Spinner};
+use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, SeekBar, Slider, Spinner};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -39,6 +39,7 @@ pub struct PlayerBar {
     on_previous: Option<ClickHandler>,
     on_next: Option<ClickHandler>,
     on_seek: Option<SeekHandler>,
+    on_seek_preview: Option<SeekHandler>,
 }
 
 impl PlayerBar {
@@ -69,6 +70,7 @@ impl PlayerBar {
             on_previous: None,
             on_next: None,
             on_seek: None,
+            on_seek_preview: None,
         }
     }
 
@@ -216,6 +218,14 @@ impl PlayerBar {
 
     pub fn on_seek(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
         self.on_seek = Some(Arc::new(handler));
+        self
+    }
+
+    pub fn on_seek_preview(
+        mut self,
+        handler: impl Fn(f32, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_seek_preview = Some(Arc::new(handler));
         self
     }
 }
@@ -479,7 +489,21 @@ impl RenderOnce for PlayerBar {
                     .text_right()
                     .child(self.elapsed),
             )
-            .child(seek_area(self.progress, self.on_seek))
+            .child({
+                let preview = self.on_seek_preview;
+                let commit = self.on_seek;
+                SeekBar::new(self.progress)
+                    .on_preview(move |fraction, window, cx| {
+                        if let Some(handler) = preview.as_ref() {
+                            handler(fraction, window, cx);
+                        }
+                    })
+                    .on_commit(move |fraction, window, cx| {
+                        if let Some(handler) = commit.as_ref() {
+                            handler(fraction, window, cx);
+                        }
+                    })
+            })
             .child(
                 gpui::div()
                     .w(px(38.0))
@@ -575,79 +599,4 @@ impl RenderOnce for PlayerBar {
             .child(center)
             .child(right)
     }
-}
-
-fn seek_area(progress: f32, on_seek: Option<SeekHandler>) -> gpui::Div {
-    let bounds: Arc<Mutex<Option<Bounds<gpui::Pixels>>>> = Arc::new(Mutex::new(None));
-    let bounds_for_canvas = bounds.clone();
-    let bounds_for_down = bounds.clone();
-    let bounds_for_move = bounds;
-    let handler = on_seek;
-    let handler_for_down = handler.clone();
-    let handler_for_move = handler;
-
-    gpui::div()
-        .relative()
-        .flex_1()
-        .h(px(20.0))
-        .flex()
-        .items_center()
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            move |event: &MouseDownEvent, window, cx| {
-                let Some(handler) = handler_for_down.as_ref() else {
-                    return;
-                };
-                let Ok(bounds) = bounds_for_down.lock() else {
-                    return;
-                };
-                let Some(bounds) = bounds.as_ref() else {
-                    return;
-                };
-                let width = f32::from(bounds.size.width);
-                if width <= 0.0 {
-                    return;
-                }
-                let fraction = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
-                    .clamp(0.0, 1.0);
-                handler(fraction, window, cx);
-            },
-        )
-        .on_mouse_move(move |event: &gpui::MouseMoveEvent, window, cx| {
-            if !event.dragging() {
-                return;
-            }
-            let Some(handler) = handler_for_move.as_ref() else {
-                return;
-            };
-            let Ok(bounds) = bounds_for_move.lock() else {
-                return;
-            };
-            let Some(bounds) = bounds.as_ref() else {
-                return;
-            };
-            let width = f32::from(bounds.size.width);
-            if width <= 0.0 {
-                return;
-            }
-            let fraction = ((f32::from(event.position.x) - f32::from(bounds.origin.x)) / width)
-                .clamp(0.0, 1.0);
-            handler(fraction, window, cx);
-        })
-        .child(ProgressBar::new(progress).height(4.0))
-        .child(
-            canvas(
-                move |bounds, _, _| {
-                    if let Ok(mut slot) = bounds_for_canvas.lock() {
-                        *slot = Some(bounds);
-                    }
-                },
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .top(px(0.0))
-            .left(px(0.0))
-            .size_full(),
-        )
 }

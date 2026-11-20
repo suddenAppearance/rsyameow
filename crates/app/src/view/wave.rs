@@ -55,8 +55,13 @@ impl RootView {
                     .into_any_element(),
             };
             let playing = self.player.playing;
-            let progress = self.player.progress();
-            let elapsed = format::duration(self.player.position);
+            let seek_preview = self.seek_preview;
+            let progress = seek_preview.unwrap_or_else(|| self.player.progress());
+            let elapsed = if let Some(fraction) = seek_preview {
+                format::duration(track.duration().mul_f32(fraction))
+            } else {
+                format::duration(self.player.position)
+            };
             let duration = format::duration(track.duration());
             let liked = self.is_liked(&track);
 
@@ -119,14 +124,22 @@ impl RootView {
                             .flex_col()
                             .gap(px(space::XS))
                             .child({
-                                let view = cx.entity();
-                                Slider::new(progress).width(420.0).on_change(
-                                    move |fraction, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.seek_to(fraction, cx);
+                                let preview_view = cx.entity();
+                                let commit_view = cx.entity();
+                                SeekBar::new(progress)
+                                    .on_preview(move |fraction, _, cx| {
+                                        preview_view.update(cx, |this, cx| {
+                                            this.seek_preview = Some(fraction);
+                                            cx.notify();
                                         });
-                                    },
-                                )
+                                    })
+                                    .on_commit(move |fraction, _, cx| {
+                                        commit_view.update(cx, |this, cx| {
+                                            if this.seek_preview.is_some() {
+                                                this.seek_to(fraction, cx);
+                                            }
+                                        });
+                                    })
                             })
                             .child(
                                 div()

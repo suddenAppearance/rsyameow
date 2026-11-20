@@ -27,7 +27,7 @@ use gpui::{
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
-    Slider, Spinner, Stat, Theme, TrackRow, icons, space, text,
+    SeekBar, Spinner, Stat, Theme, TrackRow, icons, space, text,
 };
 use std::sync::Arc;
 use yandex_music::{Playlist, Status, Track};
