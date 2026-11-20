@@ -373,6 +373,7 @@ impl RenderOnce for PlayerBar {
             .items_center()
             .gap(px(space::MD))
             .w(px(if self.compact { 260.0 } else { 300.0 }))
+            .h_full()
             .flex_shrink_0()
             .child(
                 gpui::div()
@@ -385,10 +386,13 @@ impl RenderOnce for PlayerBar {
             )
             .child(left_meta);
 
+        if has_track {
+            left = left.border_r_1().border_color(theme.colors.border);
+        }
+
         if has_track && let Some(handler) = self.on_track {
             left = left
                 .cursor_pointer()
-                .rounded(px(8.0))
                 .hover(|style| style.opacity(0.82))
                 .on_click(handler);
         }
