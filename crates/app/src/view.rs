@@ -863,21 +863,7 @@ impl RootView {
                         .flex_col()
                         .gap(px(space::LG))
                         .child(header)
-                        .child(self.liked_section(theme, cx))
-                        .child(
-                            div()
-                                .pt(px(space::SM))
-                                .text_size(px(text::XS))
-                                .text_color(theme.colors.text_muted)
-                                .child(format!(
-                                    "Показаны {} последних треков из {}.",
-                                    self.profile
-                                        .as_ref()
-                                        .map(|profile| profile.sample.len())
-                                        .unwrap_or(0),
-                                    total
-                                )),
-                        ),
+                        .child(self.liked_section(theme, cx)),
                 ),
             )
             .into_any_element()
