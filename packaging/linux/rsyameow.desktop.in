@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Я.Мяу
+Name[en]=Ya.Myau
+GenericName=Music Player
+GenericName[ru]=Музыкальный плеер
+Comment=Неофициальный клиент Яндекс Музыки
+Comment[en]=Unofficial Yandex Music client
+Exec="@EXEC@"
+TryExec=@EXEC@
+Icon=rsyameow
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;yandex;player;
+Keywords[ru]=музыка;яндекс;плеер;
+StartupNotify=true
+StartupWMClass=rsyameow

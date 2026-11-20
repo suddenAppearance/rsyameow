@@ -237,6 +237,33 @@ cargo build --release -p rsyameow
 ./target/release/rsyameow
 ```
 
+### Установка для текущего пользователя
+
+```bash
+./scripts/install-linux.sh
+```
+
+Скрипт собирает релизный бинарник и устанавливает его без `sudo`:
+
+- `~/.local/bin/rsyameow`;
+- `~/.local/share/applications/rsyameow.desktop` — пункт «Я.Мяу» в меню приложений;
+- `~/.local/share/icons/hicolor/scalable/apps/rsyameow.svg` — иконка.
+
+Дополнительно:
+
+```bash
+# другой префикс
+./scripts/install-linux.sh --prefix "$HOME/.local"
+
+# использовать уже собранный target/release/rsyameow
+./scripts/install-linux.sh --no-build
+
+# удалить установленные файлы
+./scripts/install-linux.sh --uninstall
+```
+
+Если `~/.local/bin` не входит в `PATH`, скрипт подскажет, как его добавить.
+
 ## Авторизация
 
 1. Нажмите **«Получить код»**.
