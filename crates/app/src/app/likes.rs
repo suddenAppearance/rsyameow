@@ -1,0 +1,135 @@
+//! Liked-track state and mutation helpers.
+
+use super::*;
+
+impl RootView {
+    pub(crate) fn is_current_liked(&self) -> bool {
+        self.player
+            .track
+            .as_ref()
+            .is_some_and(|track| self.is_track_liked(track))
+    }
+
+    pub(crate) fn is_track_liked(&self, track: &Track) -> bool {
+        let full_id = track.full_id();
+        self.profile.as_ref().is_some_and(|profile| {
+            profile
+                .liked
+                .iter()
+                .any(|short| short.id == track.id || short.track_id() == full_id)
+        })
+    }
+
+    pub(crate) fn is_liked(&self, track: &Track) -> bool {
+        self.is_track_liked(track)
+    }
+
+    pub(crate) fn toggle_like(&mut self, cx: &mut Context<Self>) {
+        let Some(track) = self.player.track.clone() else {
+            return;
+        };
+        self.toggle_like_track(track, cx);
+    }
+
+    pub(crate) fn toggle_like_track(&mut self, track: Track, cx: &mut Context<Self>) {
+        if self.like_busy {
+            return;
+        }
+        let liked = self.is_track_liked(&track);
+
+        if self.demo {
+            self.apply_like_state(track, !liked);
+            cx.notify();
+            return;
+        }
+
+        if self.client.token().is_none() {
+            self.player.error = Some("Нужно войти в аккаунт.".into());
+            cx.notify();
+            return;
+        }
+
+        self.like_busy = true;
+        let client = self.client.clone();
+        let track_id = track.id.clone();
+        let track_for_ui = track.clone();
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    if liked {
+                        client.unlike_tracks(&[track_id])
+                    } else {
+                        client.like_tracks(&[track_id])
+                    }
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                this.like_busy = false;
+                match result {
+                    Ok(()) => this.apply_like_state(track_for_ui, !liked),
+                    Err(error) => this.player.error = Some(error_text(&error)),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn apply_like_state(&mut self, track: Track, liked: bool) {
+        let full_id = track.full_id();
+        let existing_cover = self.covers.get(&track.id).cloned();
+        let Some(profile) = self.profile.as_mut() else {
+            return;
+        };
+
+        let already_liked = profile
+            .liked
+            .iter()
+            .any(|short| short.id == track.id || short.track_id() == full_id);
+
+        if liked {
+            if !already_liked {
+                let album_id = track
+                    .albums
+                    .first()
+                    .and_then(|album| album.id)
+                    .map(|id| id.to_string());
+                profile.liked.insert(
+                    0,
+                    TrackShort {
+                        id: track.id.clone(),
+                        album_id,
+                        timestamp: None,
+                        play_count: None,
+                        recent: None,
+                        original_index: None,
+                        track: None,
+                    },
+                );
+                profile.total_liked += 1;
+            }
+
+            if !profile.sample.iter().any(|item| item.id == track.id) {
+                profile.sample.insert(0, track.clone());
+                profile.sample.truncate(24);
+            }
+        } else {
+            let before = profile.liked.len();
+            profile
+                .liked
+                .retain(|short| short.id != track.id && short.track_id() != full_id);
+            if profile.liked.len() < before {
+                profile.total_liked = profile.total_liked.saturating_sub(1);
+            }
+            profile.sample.retain(|item| item.id != track.id);
+        }
+
+        if liked && let Some(cover) = existing_cover {
+            self.covers.entry(track.id).or_insert(cover);
+        }
+    }
+}
