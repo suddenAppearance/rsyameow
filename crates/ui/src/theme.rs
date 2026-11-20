@@ -174,6 +174,9 @@ pub mod icons {
     pub const PLAYLIST: &str = "icons/playlist.svg";
     pub const QUEUE: &str = "icons/queue.svg";
     pub const CLOSE: &str = "icons/close.svg";
+    pub const WINDOW_MINIMIZE: &str = "icons/window-minimize.svg";
+    pub const WINDOW_MAXIMIZE: &str = "icons/window-maximize.svg";
+    pub const WINDOW_RESTORE: &str = "icons/window-restore.svg";
     pub const CHEVRON_LEFT: &str = "icons/chevron-left.svg";
     pub const VOLUME: &str = "icons/volume.svg";
     pub const VOLUME_MUTED: &str = "icons/volume-muted.svg";

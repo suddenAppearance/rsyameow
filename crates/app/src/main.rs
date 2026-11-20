@@ -9,13 +9,13 @@ mod format;
 mod view;
 
 use app::{
-    CloseQueue, FocusSearch, NextTrack, PreviousTrack, RootView, ToggleMute, TogglePlayback,
-    ToggleQueue,
+    CloseQueue, CloseWindow, FocusSearch, NextTrack, PreviousTrack, RootView, ToggleMute,
+    TogglePlayback, ToggleQueue,
 };
 use assets::Assets;
 use gpui::{
     App, AppContext as _, Application, Bounds, KeyBinding, SharedString, WindowBounds,
-    WindowOptions, px, size,
+    WindowDecorations, WindowOptions, px, size,
 };
 use rsyameow_ui::Theme;
 
@@ -114,6 +114,7 @@ fn main() {
                 KeyBinding::new("ctrl-q", ToggleQueue, Some("rsyameow")),
                 KeyBinding::new("escape", CloseQueue, Some("rsyameow")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("rsyameow")),
+                KeyBinding::new("ctrl-w", CloseWindow, Some("rsyameow")),
             ]);
 
             cx.on_window_closed(|cx| {
@@ -146,8 +147,17 @@ fn main() {
                 window_min_size: Some(size(px(960.0), px(640.0))),
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some(SharedString::from("rsyameow — Яндекс Музыка")),
+                    appears_transparent: true,
                     ..Default::default()
                 }),
+                // The app draws its own header and resize edges. On Wayland
+                // every compositor supports client-side decorations; on X11
+                // gpui falls back to server decorations when no compositor is
+                // present, and the header remains usable in both cases.
+                window_decorations: Some(WindowDecorations::Client),
+                is_movable: true,
+                is_resizable: true,
+                is_minimizable: true,
                 app_id: Some("rsyameow".to_string()),
                 ..Default::default()
             };

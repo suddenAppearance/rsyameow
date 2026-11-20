@@ -1,13 +1,14 @@
 //! Rendering for [`RootView`].
 
 use crate::app::{
-    CloseQueue, FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind, ToggleMute,
-    TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
+    CloseQueue, CloseWindow, FocusSearch, NextTrack, PreviousTrack, RootView, Screen, SearchKind,
+    ToggleMute, TogglePlayback, ToggleQueue, plan_name, plus_until, registered_year,
 };
 use crate::format;
 use gpui::{
-    AnyElement, Context, Div, ElementId, Focusable as _, Image, ImageSource, IntoElement,
-    ObjectFit, Render, SharedString, Window, div, img, prelude::*, px, relative, rgba,
+    AnyElement, Context, CursorStyle, Div, ElementId, Focusable as _, Image, ImageSource,
+    IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba, SharedString, Stateful, Window,
+    div, img, prelude::*, px, relative, rgba,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
@@ -31,10 +32,10 @@ impl Render for RootView {
         let theme = Theme::get(cx).clone();
         let screen = self.screen.clone();
 
-        let content: AnyElement = match screen {
+        let content: AnyElement = match &screen {
             Screen::Login => self.login_view(&theme, cx),
             Screen::Loading => self.loading_view(&theme),
-            Screen::LoadError(message) => self.load_error_view(&message, &theme, cx),
+            Screen::LoadError(message) => self.load_error_view(message, &theme, cx),
             Screen::Profile => self.profile_view(&theme, cx),
             Screen::Search => self.search_view(&theme, cx),
             Screen::Playlists => self.playlists_view(&theme, cx),
@@ -42,6 +43,7 @@ impl Render for RootView {
         };
 
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -56,10 +58,104 @@ impl Render for RootView {
             .on_action(
                 cx.listener(|this, _: &FocusSearch, window, cx| this.open_search(window, cx)),
             )
+            .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .bg(theme.colors.background)
             .text_color(theme.colors.text)
             .font_family(theme.fonts.ui.clone())
-            .child(content)
+            .child(title_bar(&screen, window, &theme))
+            .child(div().flex_1().min_h(px(0.0)).child(content))
+            .child(
+                resize_handle("resize-top", ResizeEdge::Top, CursorStyle::ResizeUpDown)
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(8.0))
+                    .right(px(8.0))
+                    .h(px(5.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-bottom",
+                    ResizeEdge::Bottom,
+                    CursorStyle::ResizeUpDown,
+                )
+                .absolute()
+                .bottom(px(0.0))
+                .left(px(8.0))
+                .right(px(8.0))
+                .h(px(5.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-left",
+                    ResizeEdge::Left,
+                    CursorStyle::ResizeLeftRight,
+                )
+                .absolute()
+                .left(px(0.0))
+                .top(px(8.0))
+                .bottom(px(8.0))
+                .w(px(5.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-right",
+                    ResizeEdge::Right,
+                    CursorStyle::ResizeLeftRight,
+                )
+                .absolute()
+                .right(px(0.0))
+                .top(px(8.0))
+                .bottom(px(8.0))
+                .w(px(5.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-top-left",
+                    ResizeEdge::TopLeft,
+                    CursorStyle::ResizeUpLeftDownRight,
+                )
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-top-right",
+                    ResizeEdge::TopRight,
+                    CursorStyle::ResizeUpRightDownLeft,
+                )
+                .absolute()
+                .top(px(0.0))
+                .right(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-bottom-left",
+                    ResizeEdge::BottomLeft,
+                    CursorStyle::ResizeUpRightDownLeft,
+                )
+                .absolute()
+                .bottom(px(0.0))
+                .left(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0)),
+            )
+            .child(
+                resize_handle(
+                    "resize-bottom-right",
+                    ResizeEdge::BottomRight,
+                    CursorStyle::ResizeUpLeftDownRight,
+                )
+                .absolute()
+                .bottom(px(0.0))
+                .right(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0)),
+            )
     }
 }
 
@@ -2491,6 +2587,157 @@ fn search_thumb(
         .overflow_hidden()
         .flex_shrink_0()
         .child(content)
+}
+
+fn screen_title(screen: &Screen) -> &'static str {
+    match screen {
+        Screen::Login => "Вход",
+        Screen::Loading => "Загрузка",
+        Screen::Profile => "Профиль",
+        Screen::Search => "Поиск",
+        Screen::Playlists | Screen::Playlist => "Плейлисты",
+        Screen::LoadError(_) => "Ошибка",
+    }
+}
+
+/// A slim client-side titlebar with a draggable area and window controls.
+fn title_bar(screen: &Screen, window: &mut Window, theme: &Theme) -> AnyElement {
+    let maximized = window.is_maximized();
+
+    let controls = div()
+        .flex()
+        .items_center()
+        .gap(px(2.0))
+        .child(window_control(
+            "window-minimize",
+            icons::WINDOW_MINIMIZE,
+            theme.colors.text_secondary,
+            theme.colors.surface_hover,
+            |_, window, _| window.minimize_window(),
+        ))
+        .child(window_control(
+            "window-maximize",
+            if maximized {
+                icons::WINDOW_RESTORE
+            } else {
+                icons::WINDOW_MAXIMIZE
+            },
+            theme.colors.text_secondary,
+            theme.colors.surface_hover,
+            |_, window, _| window.zoom_window(),
+        ))
+        .child(window_control(
+            "window-close",
+            icons::CLOSE,
+            theme.colors.white,
+            theme.colors.danger,
+            |_, window, _| window.remove_window(),
+        ));
+
+    div()
+        .flex()
+        .items_center()
+        .h(px(38.0))
+        .w_full()
+        .flex_shrink_0()
+        .pl(px(10.0))
+        .pr(px(8.0))
+        .bg(theme.colors.background)
+        .border_b_1()
+        .border_color(theme.colors.border)
+        .child(
+            div()
+                .size(px(18.0))
+                .rounded(px(6.0))
+                .bg(theme.colors.accent)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(icons::MUSIC)
+                        .size(9.0)
+                        .color(theme.colors.accent_text),
+                ),
+        )
+        .child(
+            div()
+                .pl(px(space::SM))
+                .pr(px(space::MD))
+                .flex()
+                .items_center()
+                .gap(px(space::SM))
+                .child(
+                    div()
+                        .text_size(px(text::SM))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(theme.colors.text)
+                        .child("rsyameow"),
+                )
+                .child(
+                    div()
+                        .size(px(3.0))
+                        .rounded_full()
+                        .bg(theme.colors.text_muted),
+                )
+                .child(
+                    div()
+                        .text_size(px(text::SM))
+                        .text_color(theme.colors.text_muted)
+                        .child(screen_title(screen)),
+                ),
+        )
+        .child(
+            div()
+                .id("window-drag-region")
+                .flex_1()
+                .h_full()
+                .cursor(CursorStyle::Arrow)
+                .on_mouse_down(MouseButton::Left, |event, window, _| {
+                    if event.click_count == 1 {
+                        window.start_window_move();
+                    }
+                })
+                .on_mouse_down(MouseButton::Right, |event, window, _| {
+                    window.show_window_menu(event.position);
+                })
+                .on_click(|event, window, _| {
+                    if event.click_count() == 2 {
+                        window.zoom_window();
+                    }
+                }),
+        )
+        .child(controls)
+        .into_any_element()
+}
+
+fn window_control(
+    id: &'static str,
+    icon: &'static str,
+    foreground: Rgba,
+    hover_background: Rgba,
+    handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(36.0))
+        .h(px(28.0))
+        .rounded(px(6.0))
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover_background))
+        .on_click(handler)
+        .child(Icon::new(icon).size(13.0).color(foreground))
+}
+
+fn resize_handle(id: &'static str, edge: ResizeEdge, cursor: CursorStyle) -> Stateful<Div> {
+    div()
+        .id(id)
+        .cursor(cursor)
+        .on_mouse_down(MouseButton::Left, move |_, window, _| {
+            window.start_window_resize(edge);
+        })
 }
 
 // ------------------------------------------------------------------ Helpers

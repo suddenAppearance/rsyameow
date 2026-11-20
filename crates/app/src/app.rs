@@ -20,7 +20,8 @@ actions!(
         ToggleMute,
         ToggleQueue,
         CloseQueue,
-        FocusSearch
+        FocusSearch,
+        CloseWindow
     ]
 );
 
