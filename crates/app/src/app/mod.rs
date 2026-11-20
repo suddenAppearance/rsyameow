@@ -440,15 +440,17 @@ impl RootView {
     /// a track. Demo playback is simulated; real playback asks rodio.
     pub(crate) fn spawn_ticker(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let mut tick = 0u64;
             loop {
-                Timer::after(Duration::from_millis(200)).await;
+                Timer::after(Duration::from_millis(33)).await;
+                tick = tick.wrapping_add(1);
 
                 let updated = this.update(cx, |this, cx| {
                     let immersive = matches!(
                         this.screen,
                         Screen::Track | Screen::NowPlaying | Screen::Wave
                     );
-                    if !immersive && this.player.playing {
+                    if !immersive && this.player.playing && tick.is_multiple_of(6) {
                         this.animation_phase = this.animation_phase.wrapping_add(1);
                     }
                     if !this.player.playing || this.player.loading {
@@ -458,7 +460,7 @@ impl RootView {
                     let mut finished = false;
 
                     if this.demo {
-                        this.player.position += Duration::from_millis(200);
+                        this.player.position += Duration::from_millis(33);
                         if let Some(duration) = this.player.track.as_ref().map(Track::duration)
                             && this.player.position >= duration
                         {

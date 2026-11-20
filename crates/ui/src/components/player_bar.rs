@@ -763,17 +763,21 @@ impl RenderOnce for PlayerBar {
             );
 
         if let Some(time) = self.seek_time.filter(|_| !self.controls_hovered) {
-            let fraction = self.seek_preview.unwrap_or(self.progress).clamp(0.0, 0.88);
+            let fraction = self.seek_preview.unwrap_or(self.progress);
             center = center.child(
                 gpui::div()
                     .absolute()
                     .top(px(-28.0))
                     .left(relative(fraction))
+                    .ml(px(-52.0))
+                    .w(px(104.0))
+                    .flex()
+                    .justify_center()
                     .rounded(px(999.0))
                     .bg(gpui::rgba(0x111111F2))
                     .border_1()
                     .border_color(gpui::rgba(0xFFFFFF24))
-                    .px(px(space::SM))
+                    .px(px(space::XS))
                     .py(px(3.0))
                     .text_size(px(text::XS))
                     .text_color(theme.colors.text)
