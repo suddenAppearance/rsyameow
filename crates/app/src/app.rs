@@ -46,6 +46,8 @@ pub(crate) struct SearchState {
     pub(crate) query: String,
     pub(crate) results: Vec<Track>,
     pub(crate) total: usize,
+    pub(crate) page: u32,
+    pub(crate) per_page: u64,
     pub(crate) loading: bool,
     pub(crate) searched: bool,
     pub(crate) error: Option<String>,
@@ -703,12 +705,37 @@ impl RootView {
 
     pub(crate) fn perform_search(&mut self, cx: &mut Context<Self>) {
         let query = self.search_input.read(cx).text().trim().to_string();
+        self.run_search(query, 0, cx);
+    }
+
+    pub(crate) fn search_next(&mut self, cx: &mut Context<Self>) {
+        if self.search.loading || self.search.query.is_empty() {
+            return;
+        }
+        let next = self.search.page + 1;
+        if (next as u64) * self.search.per_page.max(1) >= self.search.total as u64 {
+            return;
+        }
+        let query = self.search.query.clone();
+        self.run_search(query, next, cx);
+    }
+
+    pub(crate) fn search_previous(&mut self, cx: &mut Context<Self>) {
+        if self.search.loading || self.search.page == 0 || self.search.query.is_empty() {
+            return;
+        }
+        let query = self.search.query.clone();
+        self.run_search(query, self.search.page - 1, cx);
+    }
+
+    fn run_search(&mut self, query: String, page: u32, cx: &mut Context<Self>) {
         if query.is_empty() {
             self.search.searched = true;
             self.search.error = Some("Введите запрос для поиска.".into());
             self.search.loading = false;
             self.search.results.clear();
             self.search.total = 0;
+            self.search.page = 0;
             cx.notify();
             return;
         }
@@ -719,6 +746,7 @@ impl RootView {
         self.search.searched = true;
         self.search.loading = true;
         self.search.error = None;
+        self.search.page = page;
         self.search.results.clear();
         self.search.total = 0;
         cx.notify();
@@ -753,6 +781,8 @@ impl RootView {
 
             self.search.loading = false;
             self.search.total = results.len();
+            self.search.per_page = results.len().max(1) as u64;
+            self.search.page = 0;
             self.search.results = results.clone();
             self.load_covers(results, cx);
             cx.notify();
@@ -762,7 +792,7 @@ impl RootView {
         let client = self.client.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
-                .background_spawn(async move { client.search_tracks(&query, 0) })
+                .background_spawn(async move { client.search_tracks(&query, page) })
                 .await;
 
             this.update(cx, |this, cx| {
@@ -773,6 +803,8 @@ impl RootView {
                 match result {
                     Ok(found) => {
                         this.search.total = found.total as usize;
+                        this.search.per_page = found.per_page;
+                        this.search.page = page;
                         this.search.results = found.results;
                         this.search.error = None;
                         let tracks = this.search.results.clone();

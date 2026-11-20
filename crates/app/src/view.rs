@@ -1393,6 +1393,9 @@ impl RootView {
         let loading = self.search.loading;
         let searched = self.search.searched;
         let query = self.search.query.clone();
+        let page = self.search.page;
+        let per_page = self.search.per_page.max(1);
+        let pages = ((total as u64).saturating_add(per_page - 1) / per_page).max(1);
         let error = self.search.error.clone();
         let current_id = self.player.track.as_ref().map(|track| track.id.clone());
         let playing = self.player.playing;
@@ -1534,6 +1537,45 @@ impl RootView {
                     }));
 
                     list = list.child(row);
+                }
+
+                if !self.demo && total > results.len() {
+                    list = list.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(space::SM))
+                            .pt(px(space::MD))
+                            .child(
+                                Button::new("search-prev", "Назад")
+                                    .variant(ButtonVariant::Secondary)
+                                    .size(ButtonSize::Small)
+                                    .icon(icons::CHEVRON_LEFT)
+                                    .disabled(page == 0 || loading)
+                                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                        this.search_previous(cx);
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(text::XS))
+                                    .text_color(theme.colors.text_muted)
+                                    .child(format!("Страница {} из {pages}", page + 1)),
+                            )
+                            .child(
+                                Button::new("search-next", "Вперёд")
+                                    .variant(ButtonVariant::Secondary)
+                                    .size(ButtonSize::Small)
+                                    .trailing_icon(icons::CHEVRON_RIGHT)
+                                    .disabled(
+                                        (page as u64 + 1) * per_page >= total as u64 || loading,
+                                    )
+                                    .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                        this.search_next(cx);
+                                    })),
+                            ),
+                    );
                 }
 
                 body = body.child(list);
