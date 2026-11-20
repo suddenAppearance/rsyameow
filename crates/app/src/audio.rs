@@ -74,6 +74,17 @@ impl AudioEngine {
         }
     }
 
+    pub fn seek(&mut self, position: Duration) -> Result<(), String> {
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| "трек ещё не загружен".to_string())?;
+        backend
+            .player
+            .try_seek(position)
+            .map_err(|error| format!("не удалось перемотать трек: {error}"))
+    }
+
     pub fn position(&self) -> Duration {
         self.backend
             .as_ref()

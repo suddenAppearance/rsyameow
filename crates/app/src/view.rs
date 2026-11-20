@@ -1312,6 +1312,7 @@ impl RootView {
             .unwrap_or_else(|| "0:00".into());
         let elapsed = format::duration(self.player.position);
 
+        let view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
             .cover(self.player.cover.clone())
@@ -1328,7 +1329,10 @@ impl RootView {
             }))
             .on_next(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.play_next(cx);
-            }));
+            }))
+            .on_seek(move |fraction, _, cx| {
+                view.update(cx, |this, cx| this.seek_to(fraction, cx));
+            });
 
         let _ = theme;
         bar.into_any_element()

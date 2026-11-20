@@ -982,6 +982,37 @@ impl RootView {
         .detach();
     }
 
+    pub(crate) fn seek_to(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        if self.player.loading {
+            return;
+        }
+        let Some(track) = self.player.track.clone() else {
+            return;
+        };
+        let duration = track.duration();
+        if duration.is_zero() {
+            return;
+        }
+
+        let target = duration.mul_f32(fraction.clamp(0.0, 1.0));
+        if self.demo {
+            self.player.position = target;
+            cx.notify();
+            return;
+        }
+
+        match self.audio.seek(target) {
+            Ok(()) => {
+                self.player.position = target;
+                self.player.error = None;
+            }
+            Err(error) => {
+                self.player.error = Some(error);
+            }
+        }
+        cx.notify();
+    }
+
     pub(crate) fn toggle_playback(&mut self, cx: &mut Context<Self>) {
         if self.player.loading {
             return;
