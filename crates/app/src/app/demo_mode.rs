@@ -66,6 +66,7 @@ impl RootView {
         self.audio.stop();
         self.seek_preview = None;
         self.seek_hover = None;
+        self.seek_controls_hovered = false;
         self.lyrics_expanded = false;
         self.cache_track(&track);
         self.playback_epoch += 1;

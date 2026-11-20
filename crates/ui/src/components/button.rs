@@ -6,6 +6,8 @@ use gpui::{
 
 use super::{ClickHandler, Icon, Spinner};
 
+type HoverHandler = Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>;
+
 /// Visual style of a [`Button`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonVariant {
@@ -253,6 +255,7 @@ pub struct IconButton {
     disabled: bool,
     loading: bool,
     on_click: Option<ClickHandler>,
+    on_hover: Option<HoverHandler>,
 }
 
 impl IconButton {
@@ -266,6 +269,7 @@ impl IconButton {
             disabled: false,
             loading: false,
             on_click: None,
+            on_hover: None,
         }
     }
 
@@ -299,6 +303,11 @@ impl IconButton {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_hover(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_hover = Some(Box::new(handler));
         self
     }
 }
@@ -351,6 +360,12 @@ impl RenderOnce for IconButton {
             .bg(background)
             .flex_shrink_0()
             .child(content);
+
+        if let Some(handler) = self.on_hover {
+            button = button.on_hover(move |hovered, window, cx| {
+                handler(hovered, window, cx);
+            });
+        }
 
         if disabled {
             button = button.opacity(if self.loading { 0.85 } else { 0.4 });

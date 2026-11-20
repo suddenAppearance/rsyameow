@@ -406,23 +406,32 @@ impl RootView {
             format::duration(self.player.position)
         };
         let seek_hover = self.seek_hover;
-        let tooltip_fraction = seek_preview.or(seek_hover);
-        let seek_time = tooltip_fraction.and_then(|fraction| {
+        let seek_time = if seek_preview.is_some() || seek_hover.is_some() {
             track.as_ref().map(|track| {
+                let fraction = seek_preview.unwrap_or(progress);
                 SharedString::from(format!(
                     "{} / {}",
                     format::duration(track.duration().mul_f32(fraction)),
                     format::duration(track.duration())
                 ))
             })
-        });
-        let artist_link = track
+        } else {
+            None
+        };
+        let artists = track
             .as_ref()
-            .and_then(|track| track.artists.first().cloned());
+            .map(|track| track.artists.clone())
+            .unwrap_or_default();
+        let artist_names: Vec<SharedString> = artists
+            .iter()
+            .map(|artist| SharedString::from(artist.display_name().to_string()))
+            .collect();
 
         let view = cx.entity();
+        let artist_view = cx.entity();
         let preview_view = cx.entity();
         let hover_view = cx.entity();
+        let controls_hover_view = cx.entity();
         let volume_view = cx.entity();
         let bar = PlayerBar::new()
             .track(title, artist)
@@ -432,6 +441,7 @@ impl RootView {
                     .as_ref()
                     .is_some_and(|track| track.explicit.unwrap_or(false)),
             )
+            .artists(artist_names)
             .cover(self.player.cover.clone())
             .progress(progress, elapsed, duration)
             .playing(self.player.playing)
@@ -451,13 +461,15 @@ impl RootView {
             .on_track(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.open_now_playing(cx);
             }))
-            .on_artist(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
-                if let Some(artist) = artist_link.clone()
+            .on_artist(move |index, _event, _, cx| {
+                if let Some(artist) = artists.get(index).cloned()
                     && let Some(id) = artist.id
                 {
-                    this.open_artist(id, Some(artist), cx);
+                    artist_view.update(cx, |this, cx| {
+                        this.open_artist(id, Some(artist), cx);
+                    });
                 }
-            }))
+            })
             .on_mute(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
                 this.toggle_mute(cx);
             }))
@@ -474,11 +486,21 @@ impl RootView {
                 this.play_next(cx);
             }))
             .seek_hover(seek_hover)
+            .controls_hovered(self.seek_controls_hovered)
+            .on_controls_hover(move |hovered, _, cx| {
+                controls_hover_view.update(cx, |this, cx| {
+                    this.seek_controls_hovered = hovered;
+                    cx.notify();
+                });
+            })
             .seek_preview(seek_preview)
             .seek_time(seek_time)
             .on_seek_hover(move |fraction, _, cx| {
                 hover_view.update(cx, |this, cx| {
                     this.seek_hover = fraction;
+                    if fraction.is_some() {
+                        this.seek_controls_hovered = false;
+                    }
                     cx.notify();
                 });
             })

@@ -278,39 +278,44 @@ impl RenderOnce for TrackRow {
                             "track-artist-hover-{}-{}",
                             self.index, self.artist
                         ));
-                        let mut artist = gpui::div()
+                        let mut artist_link = gpui::div()
                             .id(ElementId::Name(SharedString::from(format!(
-                                "track-artist-{}-{}",
+                                "track-artist-link-{}-{}",
                                 self.index, self.artist
                             ))))
+                            .flex()
                             .group(group.clone())
-                            .w_full()
                             .cursor_pointer()
                             .child(
-                                gpui::div().flex().child(
-                                    gpui::div()
-                                        .border_b_1()
-                                        .border_color(gpui::transparent_black())
-                                        .text_size(px(text::SM))
-                                        .text_color(theme.colors.text_muted)
-                                        .whitespace_nowrap()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .group_hover(group, |style| {
-                                            style
-                                                .text_color(theme.colors.accent)
-                                                .border_color(theme.colors.accent)
-                                        })
-                                        .child(self.artist),
-                                ),
+                                gpui::div()
+                                    .border_b_1()
+                                    .border_color(gpui::transparent_black())
+                                    .text_size(px(text::SM))
+                                    .text_color(theme.colors.text_muted)
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .group_hover(group, |style| {
+                                        style
+                                            .text_color(theme.colors.accent)
+                                            .border_color(theme.colors.accent)
+                                    })
+                                    .child(self.artist.clone()),
                             );
                         if let Some(handler) = self.on_artist {
-                            artist = artist.on_click(move |event, window, cx| {
+                            artist_link = artist_link.on_click(move |event, window, cx| {
                                 cx.stop_propagation();
                                 handler(event, window, cx);
                             });
                         }
-                        artist
+                        gpui::div()
+                            .id(ElementId::Name(SharedString::from(format!(
+                                "track-artist-{}-{}",
+                                self.index, self.artist
+                            ))))
+                            .w_full()
+                            .flex()
+                            .child(artist_link)
                     }),
             )
             .child(

@@ -235,6 +235,7 @@ impl RootView {
         self.audio.stop();
         self.seek_preview = None;
         self.seek_hover = None;
+        self.seek_controls_hovered = false;
         self.playback_epoch += 1;
         let epoch = self.playback_epoch;
         let client = self.client.clone();

@@ -1,14 +1,17 @@
 use crate::theme::{Theme, icons, space, text};
 use gpui::{
-    App, Bounds, ClickEvent, FontWeight, Image, ImageSource, IntoElement, MouseButton,
+    App, Bounds, ClickEvent, ElementId, FontWeight, Image, ImageSource, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, RenderOnce, SharedString, Window,
     canvas, img, prelude::*, px, relative,
 };
 use std::sync::{Arc, Mutex};
 
-use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, ProgressBar, Slider};
+use super::{Badge, BadgeTone, ButtonVariant, Icon, IconButton, Slider};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type ArtistHandler = Arc<dyn Fn(usize, &ClickEvent, &mut Window, &mut App) + 'static>;
+type TrackHandler = Arc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type ControlsHoverHandler = Arc<dyn Fn(bool, &mut Window, &mut App) + 'static>;
 type SeekHandler = Arc<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 type SeekHoverHandler = Arc<dyn Fn(Option<f32>, &mut Window, &mut App) + 'static>;
 type VolumeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
@@ -18,6 +21,7 @@ type VolumeHandler = Box<dyn Fn(f32, &mut Window, &mut App) + 'static>;
 pub struct PlayerBar {
     title: SharedString,
     artist: SharedString,
+    artist_names: Vec<SharedString>,
     cover: Option<Arc<Image>>,
     progress: f32,
     elapsed: SharedString,
@@ -33,8 +37,8 @@ pub struct PlayerBar {
     queue_open: bool,
     on_like: Option<ClickHandler>,
     on_queue: Option<ClickHandler>,
-    on_track: Option<ClickHandler>,
-    on_artist: Option<ClickHandler>,
+    on_track: Option<TrackHandler>,
+    on_artist: Option<ArtistHandler>,
     on_mute: Option<ClickHandler>,
     on_volume: Option<VolumeHandler>,
     on_toggle: Option<ClickHandler>,
@@ -43,6 +47,8 @@ pub struct PlayerBar {
     on_seek: Option<SeekHandler>,
     on_seek_preview: Option<SeekHandler>,
     on_seek_hover: Option<SeekHoverHandler>,
+    on_controls_hover: Option<ControlsHoverHandler>,
+    controls_hovered: bool,
     seek_hover: Option<f32>,
     seek_preview: Option<f32>,
     seek_time: Option<SharedString>,
@@ -53,6 +59,7 @@ impl PlayerBar {
         Self {
             title: "".into(),
             artist: "".into(),
+            artist_names: Vec::new(),
             cover: None,
             progress: 0.0,
             elapsed: "0:00".into(),
@@ -78,6 +85,8 @@ impl PlayerBar {
             on_seek: None,
             on_seek_preview: None,
             on_seek_hover: None,
+            on_controls_hover: None,
+            controls_hovered: false,
             seek_hover: None,
             seek_preview: None,
             seek_time: None,
@@ -173,11 +182,16 @@ impl PlayerBar {
         self
     }
 
+    pub fn artists(mut self, artists: Vec<SharedString>) -> Self {
+        self.artist_names = artists;
+        self
+    }
+
     pub fn on_artist(
         mut self,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        handler: impl Fn(usize, &ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_artist = Some(Box::new(handler));
+        self.on_artist = Some(Arc::new(handler));
         self
     }
 
@@ -185,7 +199,7 @@ impl PlayerBar {
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_track = Some(Box::new(handler));
+        self.on_track = Some(Arc::new(handler));
         self
     }
 
@@ -244,6 +258,19 @@ impl PlayerBar {
         handler: impl Fn(Option<f32>, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_seek_hover = Some(Arc::new(handler));
+        self
+    }
+
+    pub fn on_controls_hover(
+        mut self,
+        handler: impl Fn(bool, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_controls_hover = Some(Arc::new(handler));
+        self
+    }
+
+    pub fn controls_hovered(mut self, hovered: bool) -> Self {
+        self.controls_hovered = hovered;
         self
     }
 
@@ -367,6 +394,21 @@ fn seek_surface(
         )
 }
 
+fn clear_tooltip_on_hover(
+    button: IconButton,
+    seek_handler: Option<SeekHoverHandler>,
+    controls_handler: Option<ControlsHoverHandler>,
+) -> IconButton {
+    button.on_hover(move |hovered, window, cx| {
+        if let Some(handler) = controls_handler.as_ref() {
+            handler(*hovered, window, cx);
+        }
+        if *hovered && let Some(handler) = seek_handler.as_ref() {
+            handler(None, window, cx);
+        }
+    })
+}
+
 fn seek_fraction(event_x: gpui::Pixels, bounds: Option<&Bounds<gpui::Pixels>>) -> Option<f32> {
     let bounds = bounds?;
     let width = f32::from(bounds.size.width);
@@ -383,7 +425,7 @@ impl Default for PlayerBar {
 }
 
 impl RenderOnce for PlayerBar {
-    fn render(mut self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::get(cx);
         let has_track = !self.title.is_empty();
 
@@ -423,6 +465,8 @@ impl RenderOnce for PlayerBar {
             theme.colors.text_muted
         };
 
+        let track_handler = self.on_track.clone();
+
         let left_meta = gpui::div()
             .flex()
             .flex_col()
@@ -436,6 +480,7 @@ impl RenderOnce for PlayerBar {
                     .min_w(px(0.0))
                     .child(
                         gpui::div()
+                            .id("player-track-title")
                             .flex_shrink()
                             .min_w(px(0.0))
                             .text_size(px(text::BASE))
@@ -446,9 +491,7 @@ impl RenderOnce for PlayerBar {
                             .text_ellipsis()
                             .border_b_1()
                             .border_color(gpui::transparent_black())
-                            .group_hover("player-track-info", |style| {
-                                style.border_color(theme.colors.accent)
-                            })
+                            .hover(|style| style.border_color(theme.colors.accent))
                             .child(title),
                     )
                     .when(self.explicit, |element| {
@@ -466,9 +509,6 @@ impl RenderOnce for PlayerBar {
                     .gap(px(space::XS))
                     .text_size(px(text::SM))
                     .text_color(subtitle_color)
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_ellipsis()
                     .when(self.error.is_some(), |element| {
                         element.child(
                             Icon::new(icons::WARNING)
@@ -477,37 +517,88 @@ impl RenderOnce for PlayerBar {
                         )
                     })
                     .child({
-                        let mut artist = gpui::div().id("player-artist").child(subtitle);
-                        if has_track
-                            && self.error.is_none()
-                            && let Some(handler) = self.on_artist.take()
-                        {
-                            artist = artist
-                                .border_b_1()
-                                .border_color(gpui::transparent_black())
-                                .cursor_pointer()
-                                .group_hover("player-track-info", |style| {
-                                    style.border_color(theme.colors.accent)
-                                })
-                                .hover(|style| style.border_color(theme.colors.accent))
-                                .on_click(move |event, window, cx| {
-                                    cx.stop_propagation();
-                                    handler(event, window, cx);
-                                });
+                        let mut artist_row = gpui::div()
+                            .id("player-artist")
+                            .flex()
+                            .items_center()
+                            .gap(px(space::XS))
+                            .w_full()
+                            .min_w(px(0.0))
+                            .overflow_hidden();
+
+                        if self.error.is_some() {
+                            artist_row = artist_row.child(
+                                Icon::new(icons::WARNING)
+                                    .size(12.0)
+                                    .color(theme.colors.danger),
+                            );
                         }
-                        artist
+
+                        if has_track && self.error.is_none() && !self.artist_names.is_empty() {
+                            let handler = self.on_artist.clone();
+                            let mut links = gpui::div()
+                                .flex()
+                                .items_center()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .overflow_hidden();
+                            for (index, name) in self.artist_names.iter().enumerate() {
+                                if index > 0 {
+                                    links = links.child(
+                                        gpui::div().text_color(theme.colors.text_muted).child(", "),
+                                    );
+                                }
+                                let mut link = gpui::div()
+                                    .id(ElementId::Name(SharedString::from(format!(
+                                        "player-artist-{index}"
+                                    ))))
+                                    .cursor_pointer()
+                                    .child(
+                                        gpui::div()
+                                            .border_b_1()
+                                            .border_color(gpui::transparent_black())
+                                            .whitespace_nowrap()
+                                            .hover(|style| {
+                                                style
+                                                    .text_color(theme.colors.accent)
+                                                    .border_color(theme.colors.accent)
+                                            })
+                                            .child(name.clone()),
+                                    );
+                                if let Some(handler) = handler.clone() {
+                                    link = link.on_click(move |event, window, cx| {
+                                        cx.stop_propagation();
+                                        handler(index, event, window, cx);
+                                    });
+                                }
+                                links = links.child(link);
+                            }
+                            artist_row = artist_row.child(links);
+                        } else {
+                            artist_row = artist_row.child(
+                                gpui::div()
+                                    .min_w(px(0.0))
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .child(subtitle),
+                            );
+                        }
+                        artist_row
                     }),
             );
 
         let mut left = gpui::div()
             .id("player-track-info")
-            .group("player-track-info")
+            .relative()
             .flex()
             .items_center()
             .gap(px(space::MD))
             .w(px(if self.compact { 260.0 } else { 300.0 }))
             .h_full()
-            .flex_shrink_0()
+            .flex_shrink_0();
+
+        left = left
             .child(
                 gpui::div()
                     .size(px(52.0))
@@ -519,17 +610,14 @@ impl RenderOnce for PlayerBar {
             )
             .child(left_meta);
 
-        if has_track {
-            left = left.border_r_1().border_color(theme.colors.border);
+        if has_track && let Some(handler) = track_handler {
+            left = left.cursor_pointer().on_click(move |event, window, cx| {
+                handler(event, window, cx);
+            });
         }
 
-        if has_track && let Some(handler) = self.on_track {
-            left = left
-                .cursor_pointer()
-                .hover(|style| style.opacity(0.82))
-                .on_click(handler);
-        }
-
+        let tooltip_hover = self.on_seek_hover.clone();
+        let controls_hover = self.on_controls_hover.clone();
         let mut toggle = IconButton::new(
             "player-toggle",
             if self.playing {
@@ -542,6 +630,7 @@ impl RenderOnce for PlayerBar {
         .icon_size(18.0)
         .variant(ButtonVariant::Primary)
         .loading(self.loading);
+        toggle = clear_tooltip_on_hover(toggle, tooltip_hover.clone(), controls_hover.clone());
 
         if !has_track || self.loading {
             toggle = toggle.disabled(true);
@@ -553,6 +642,7 @@ impl RenderOnce for PlayerBar {
             .size(36.0)
             .icon_size(16.0)
             .variant(ButtonVariant::Ghost);
+        previous = clear_tooltip_on_hover(previous, tooltip_hover.clone(), controls_hover.clone());
         if !has_track || self.loading {
             previous = previous.disabled(true);
         } else if let Some(handler) = self.on_previous {
@@ -563,6 +653,7 @@ impl RenderOnce for PlayerBar {
             .size(36.0)
             .icon_size(16.0)
             .variant(ButtonVariant::Ghost);
+        next = clear_tooltip_on_hover(next, tooltip_hover.clone(), controls_hover.clone());
         if !has_track || self.loading {
             next = next.disabled(true);
         } else if let Some(handler) = self.on_next {
@@ -584,6 +675,7 @@ impl RenderOnce for PlayerBar {
         } else {
             ButtonVariant::Ghost
         });
+        like = clear_tooltip_on_hover(like, tooltip_hover.clone(), controls_hover.clone());
         if !has_track || self.loading {
             like = like.disabled(true);
         } else if let Some(handler) = self.on_like {
@@ -603,6 +695,8 @@ impl RenderOnce for PlayerBar {
         }
 
         let controls = gpui::div()
+            .id("player-controls")
+            .occlude()
             .flex()
             .items_center()
             .gap(px(space::SM))
@@ -618,7 +712,7 @@ impl RenderOnce for PlayerBar {
             .max_w(px(520.0))
             .flex()
             .items_center()
-            .gap(px(space::SM))
+            .justify_between()
             .child(
                 gpui::div()
                     .w(px(38.0))
@@ -627,7 +721,6 @@ impl RenderOnce for PlayerBar {
                     .text_right()
                     .child(self.elapsed),
             )
-            .child(ProgressBar::new(self.progress).height(3.0))
             .child(
                 gpui::div()
                     .w(px(38.0))
@@ -648,13 +741,35 @@ impl RenderOnce for PlayerBar {
             .min_w(px(0.0))
             .h_full()
             .rounded(px(12.0))
-            .hover(|style| style.bg(theme.colors.surface_hover))
-            .border_r_1()
-            .border_color(theme.colors.border);
+            .bg(gpui::rgba(0xFFFFFF06))
+            .hover(|style| style.bg(gpui::rgba(0xFFFFFF0F)));
 
         if seek_active {
-            center = center.bg(theme.colors.surface_hover);
+            center = center.bg(gpui::rgba(0xFFFFFF0D));
         }
+
+        center = center.child(
+            gpui::div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .size_full()
+                .rounded(px(12.0))
+                .overflow_hidden()
+                .child(
+                    gpui::div()
+                        .absolute()
+                        .top(px(0.0))
+                        .left(px(0.0))
+                        .h_full()
+                        .w(relative(self.progress))
+                        .bg(if seek_active {
+                            gpui::rgba(0xFFFFFF33)
+                        } else {
+                            gpui::rgba(0xFFFFFF1F)
+                        }),
+                ),
+        );
 
         center = center.child(seek_surface(
             self.on_seek_hover,
@@ -662,14 +777,30 @@ impl RenderOnce for PlayerBar {
             self.on_seek,
         ));
 
-        center = center.child(controls).child(progress_row);
+        center = center
+            .child(controls)
+            .child(progress_row)
+            .child(
+                gpui::div()
+                    .absolute()
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .left(px(0.0))
+                    .w(px(1.0))
+                    .bg(theme.colors.border),
+            )
+            .child(
+                gpui::div()
+                    .absolute()
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .right(px(0.0))
+                    .w(px(1.0))
+                    .bg(theme.colors.border),
+            );
 
-        if let Some(time) = self.seek_time {
-            let fraction = self
-                .seek_preview
-                .or(self.seek_hover)
-                .unwrap_or(0.0)
-                .clamp(0.04, 0.86);
+        if let Some(time) = self.seek_time.filter(|_| !self.controls_hovered) {
+            let fraction = self.seek_preview.unwrap_or(self.progress).clamp(0.0, 0.88);
             center = center.child(
                 gpui::div()
                     .absolute()
@@ -701,6 +832,7 @@ impl RenderOnce for PlayerBar {
         )
         .size(30.0)
         .icon_size(15.0);
+        mute = clear_tooltip_on_hover(mute, tooltip_hover, controls_hover);
         if let Some(handler) = self.on_mute {
             mute = mute.on_click(handler);
         }
