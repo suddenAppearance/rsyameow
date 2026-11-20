@@ -32,6 +32,7 @@ impl Render for RootView {
             Screen::Loading => self.loading_view(&theme),
             Screen::LoadError(message) => self.load_error_view(&message, &theme, cx),
             Screen::Profile => self.profile_view(&theme, cx),
+            Screen::Search => self.search_view(&theme, cx),
         };
 
         div()
@@ -402,7 +403,7 @@ impl RootView {
 
     // --------------------------------------------------------------- Profile
 
-    fn profile_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn app_shell(&mut self, theme: &Theme, cx: &mut Context<Self>, main: AnyElement) -> AnyElement {
         div()
             .size_full()
             .flex()
@@ -413,10 +414,20 @@ impl RootView {
                     .flex_1()
                     .min_h(px(0.0))
                     .child(self.sidebar(theme, cx))
-                    .child(self.main_content(theme, cx)),
+                    .child(main),
             )
             .child(self.player_bar(theme, cx))
             .into_any_element()
+    }
+
+    fn profile_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let main = self.main_content(theme, cx);
+        self.app_shell(theme, cx, main)
+    }
+
+    fn search_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let main = self.search_content(theme, cx);
+        self.app_shell(theme, cx, main)
     }
 
     fn sidebar(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -429,7 +440,13 @@ impl RootView {
             .and_then(|account| account.login.clone())
             .unwrap_or_default();
 
-        let nav_item = div()
+        let profile_active = matches!(self.screen, Screen::Profile);
+        let search_active = matches!(self.screen, Screen::Search);
+        let accent = theme.colors.accent;
+        let secondary = theme.colors.text_secondary;
+        let hover_bg = theme.colors.surface_hover;
+
+        let nav_profile = div()
             .id("nav-profile")
             .flex()
             .items_center()
@@ -437,12 +454,53 @@ impl RootView {
             .h(px(42.0))
             .px(px(space::MD))
             .rounded(px(10.0))
-            .bg(theme.colors.accent_soft)
-            .text_color(theme.colors.accent)
+            .cursor_pointer()
             .text_size(px(text::BASE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
-            .child(Icon::new(icons::USER).size(17.0).color(theme.colors.accent))
-            .child("Профиль");
+            .when(profile_active, |element| {
+                element.bg(theme.colors.accent_soft).text_color(accent)
+            })
+            .when(!profile_active, |element| {
+                element
+                    .text_color(secondary)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(Icon::new(icons::USER).size(17.0).color(if profile_active {
+                accent
+            } else {
+                secondary
+            }))
+            .child("Профиль")
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_profile(cx)));
+
+        let nav_search = div()
+            .id("nav-search")
+            .flex()
+            .items_center()
+            .gap(px(space::MD))
+            .h(px(42.0))
+            .px(px(space::MD))
+            .rounded(px(10.0))
+            .cursor_pointer()
+            .text_size(px(text::BASE))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .when(search_active, |element| {
+                element.bg(theme.colors.accent_soft).text_color(accent)
+            })
+            .when(!search_active, |element| {
+                element
+                    .text_color(secondary)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(Icon::new(icons::SEARCH).size(17.0).color(if search_active {
+                accent
+            } else {
+                secondary
+            }))
+            .child("Поиск")
+            .on_click(
+                cx.listener(|this, _: &gpui::ClickEvent, window, cx| this.open_search(window, cx)),
+            );
 
         let mut account_card = div()
             .flex()
@@ -526,7 +584,8 @@ impl RootView {
                     .flex_col()
                     .gap(px(space::XS))
                     .child(section_label(theme, "МЕНЮ"))
-                    .child(nav_item),
+                    .child(nav_profile)
+                    .child(nav_search),
             )
             .child(div().flex_1())
             .child(
@@ -1052,6 +1111,191 @@ impl RootView {
         section.into_any_element()
     }
 
+    fn search_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let results = self.search.results.clone();
+        let total = self.search.total;
+        let loading = self.search.loading;
+        let searched = self.search.searched;
+        let query = self.search.query.clone();
+        let error = self.search.error.clone();
+        let current_id = self.player.track.as_ref().map(|track| track.id.clone());
+        let playing = self.player.playing;
+
+        let header = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_size(px(text::DISPLAY))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child("Поиск"),
+            )
+            .child(
+                div()
+                    .text_size(px(text::SM))
+                    .text_color(theme.colors.text_secondary)
+                    .child("Треки по всему каталогу Яндекс Музыки"),
+            );
+
+        let mut search_card = card(theme).child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(space::SM))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(self.search_input.clone()),
+                )
+                .child(
+                    Button::new("search-submit", "Найти")
+                        .variant(ButtonVariant::Primary)
+                        .icon(icons::SEARCH)
+                        .loading(loading)
+                        .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                            this.perform_search(cx);
+                        })),
+                ),
+        );
+
+        if self.demo {
+            search_card = search_card.child(
+                div()
+                    .text_size(px(text::XS))
+                    .text_color(theme.colors.text_muted)
+                    .child("В демо-режиме поиск работает по локальной коллекции."),
+            );
+        }
+
+        let mut body = div().w_full().flex().flex_col().gap(px(space::LG));
+
+        if loading {
+            body = body.child(
+                card(theme)
+                    .items_center()
+                    .py(px(space::XXL))
+                    .child(Spinner::new().size(24.0).color(theme.colors.accent))
+                    .child(
+                        div()
+                            .text_size(px(text::SM))
+                            .text_color(theme.colors.text_secondary)
+                            .child(format!("Ищем «{query}»…")),
+                    ),
+            );
+        } else if !searched {
+            body = body.child(empty_search_state(
+                theme,
+                icons::SEARCH,
+                "Что будем слушать?",
+                "Введите название трека, исполнителя или альбома — и нажмите «Найти».",
+            ));
+        } else {
+            if let Some(error) = error {
+                body = body.child(error_banner(theme, &error));
+            } else if results.is_empty() {
+                body = body.child(empty_search_state(
+                    theme,
+                    icons::SEARCH,
+                    "Ничего не найдено",
+                    &format!(
+                        "По запросу «{query}» ничего не нашлось. Попробуйте сформулировать иначе."
+                    ),
+                ));
+            } else {
+                let mut list = card(theme).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(space::MD))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(space::MD))
+                                .child(section_title(theme, "Результаты"))
+                                .child(
+                                    Badge::new(format::plural(
+                                        total as u64,
+                                        "трек",
+                                        "трека",
+                                        "треков",
+                                    ))
+                                    .tone(BadgeTone::Neutral),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(text::XS))
+                                .text_color(theme.colors.text_muted)
+                                .child(if total > results.len() {
+                                    format!("Показано {} из {total}", results.len())
+                                } else {
+                                    String::new()
+                                }),
+                        ),
+                );
+
+                for (index, track) in results.iter().enumerate() {
+                    let is_current = current_id.as_deref() == Some(track.id.as_str());
+                    let cover = self.covers.get(&track.id).cloned();
+                    let row = TrackRow::new(
+                        ElementId::Name(SharedString::from(format!("search-{}-{index}", track.id))),
+                        index + 1,
+                        track.display_title().to_string(),
+                        track.artist_names(),
+                        format::duration(track.duration()),
+                    )
+                    .cover(cover)
+                    .current(is_current, playing)
+                    .on_play(cx.listener({
+                        let track = track.clone();
+                        move |this, _: &gpui::ClickEvent, _, cx| {
+                            this.play_search_result(track.clone(), cx);
+                        }
+                    }));
+
+                    list = list.child(row);
+                }
+
+                body = body.child(list);
+            }
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .id("search-scroll")
+            .overflow_y_scroll()
+            .child(
+                div().w_full().flex().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(1180.0))
+                        .p(px(space::XL))
+                        .flex()
+                        .flex_col()
+                        .gap(px(space::LG))
+                        .child(header)
+                        .child(search_card)
+                        .child(body)
+                        .child(
+                            div()
+                                .pt(px(space::SM))
+                                .text_size(px(text::XS))
+                                .text_color(theme.colors.text_muted)
+                                .child("Поиск выполняется через официальный API Яндекс Музыки."),
+                        ),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn player_bar(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let track = self.player.track.clone();
         let title = track
@@ -1095,6 +1339,36 @@ impl RootView {
             .as_ref()
             .and_then(|profile| profile.status.account.as_ref())
     }
+}
+
+fn empty_search_state(theme: &Theme, icon: &'static str, title: &str, detail: &str) -> Div {
+    card(theme)
+        .items_center()
+        .py(px(space::XXL))
+        .child(
+            div()
+                .size(px(56.0))
+                .rounded(px(18.0))
+                .bg(theme.colors.surface_active)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(icon).size(26.0).color(theme.colors.text_muted)),
+        )
+        .child(
+            div()
+                .text_size(px(text::LG))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(title.to_string()),
+        )
+        .child(
+            div()
+                .text_size(px(text::SM))
+                .text_color(theme.colors.text_secondary)
+                .text_center()
+                .max_w(px(420.0))
+                .child(detail.to_string()),
+        )
 }
 
 // ------------------------------------------------------------------ Helpers

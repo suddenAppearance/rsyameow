@@ -334,3 +334,65 @@ fn connection_refused_is_a_network_error() {
         other => panic!("expected a network error, got {other:?}"),
     }
 }
+
+#[test]
+fn search_tracks_parses_paginated_results() {
+    let server = TestServer::start(|request| {
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/search");
+        assert_eq!(request.query_value("text"), Some("careless whisper"));
+        assert_eq!(request.query_value("type"), Some("track"));
+        assert_eq!(request.query_value("page"), Some("0"));
+        assert_eq!(request.query_value("nocorrect"), Some("false"));
+        assert_eq!(request.header("Authorization"), Some("OAuth test-token"));
+
+        MockResponse::json(
+            200,
+            json!({
+                "result": {
+                    "text": "careless whisper",
+                    "searchRequestId": "request-1",
+                    "tracks": {
+                        "type": "track",
+                        "total": 2,
+                        "perPage": 20,
+                        "order": 0,
+                        "results": [
+                            {
+                                "id": "201",
+                                "title": "Careless Whisper",
+                                "artists": [{"id": 1, "name": "George Michael"}],
+                                "albums": [{"id": 777, "title": "Make It Big"}],
+                                "durationMs": 350000,
+                                "available": true
+                            },
+                            {
+                                "id": "202",
+                                "title": "Careless Whisper (Live)",
+                                "artists": [{"id": 1, "name": "George Michael"}],
+                                "durationMs": 370000
+                            }
+                        ]
+                    }
+                }
+            }),
+        )
+    });
+
+    let client = client_for(&server, Some("test-token"));
+    let found = client.search_tracks("  careless whisper  ", 0).unwrap();
+    assert_eq!(found.total, 2);
+    assert_eq!(found.per_page, 20);
+    assert_eq!(found.results.len(), 2);
+    assert_eq!(found.results[0].title.as_deref(), Some("Careless Whisper"));
+    assert_eq!(found.results[0].artist_names(), "George Michael");
+}
+
+#[test]
+fn search_rejects_empty_queries_without_network_request() {
+    let client = Client::with_token("test-token");
+    match client.search_tracks("   ", 0) {
+        Err(Error::BadRequest(message)) => assert!(message.contains("empty")),
+        other => panic!("expected BadRequest, got {other:?}"),
+    }
+}

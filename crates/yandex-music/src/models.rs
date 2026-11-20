@@ -379,6 +379,20 @@ impl TrackShort {
     }
 }
 
+/// A paginated block of search results.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult<T> {
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub per_page: u64,
+    #[serde(default)]
+    pub order: u64,
+    #[serde(default)]
+    pub results: Vec<T>,
+}
+
 /// The user's library of liked tracks.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

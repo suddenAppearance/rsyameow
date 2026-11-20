@@ -5,7 +5,7 @@ use crate::auth::{
 };
 use crate::download::{DownloadInfo, DownloadedTrack, build_direct_link, select_best_mp3};
 use crate::http::Transport;
-use crate::models::{Status, Track, TracksList};
+use crate::models::{SearchResult, Status, Track, TracksList};
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -329,6 +329,38 @@ impl Client {
             .into_iter()
             .next()
             .ok_or_else(|| Error::NotFound(format!("track {id}")))
+    }
+
+    // ---------------------------------------------------------------- Search
+
+    /// Search for tracks by title, artist or album.
+    ///
+    /// `page` starts at zero. Yandex usually returns 20 tracks per page.
+    pub fn search_tracks(&self, text: &str, page: u32) -> Result<SearchResult<Track>> {
+        let token = self.require_token()?;
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(Error::BadRequest("search query is empty".into()));
+        }
+
+        let url = self.api_url("/search");
+        let query = [
+            ("text", text.to_string()),
+            ("nocorrect", "false".to_string()),
+            ("type", "track".to_string()),
+            ("page", page.to_string()),
+            ("playlist-in-best", "true".to_string()),
+        ];
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SearchResponse {
+            #[serde(default)]
+            tracks: Option<SearchResult<Track>>,
+        }
+
+        let response: SearchResponse = self.inner.http.get(&url, &query, Some(&token))?;
+        Ok(response.tracks.unwrap_or_default())
     }
 
     // ---------------------------------------------------------------- Likes

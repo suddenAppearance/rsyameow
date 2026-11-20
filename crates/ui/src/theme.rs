@@ -169,6 +169,7 @@ pub mod icons {
     pub const LOGOUT: &str = "icons/logout.svg";
     pub const USER: &str = "icons/user.svg";
     pub const HEART: &str = "icons/heart.svg";
+    pub const SEARCH: &str = "icons/search.svg";
     pub const MUSIC: &str = "icons/music.svg";
     pub const EXTERNAL: &str = "icons/external.svg";
     pub const REFRESH: &str = "icons/refresh.svg";

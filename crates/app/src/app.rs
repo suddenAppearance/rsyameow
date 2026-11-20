@@ -3,7 +3,8 @@
 use crate::audio::AudioEngine;
 use crate::{config, demo, format};
 use gpui::{
-    ClipboardItem, Context, Entity, Image, Subscription, Task, Timer, WeakEntity, prelude::*,
+    ClipboardItem, Context, Entity, Focusable as _, Image, Subscription, Task, Timer, WeakEntity,
+    prelude::*,
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
@@ -18,7 +19,19 @@ pub(crate) enum Screen {
     Login,
     Loading,
     Profile,
+    Search,
     LoadError(String),
+}
+
+/// State of the search page.
+#[derive(Default)]
+pub(crate) struct SearchState {
+    pub(crate) query: String,
+    pub(crate) results: Vec<Track>,
+    pub(crate) total: usize,
+    pub(crate) loading: bool,
+    pub(crate) searched: bool,
+    pub(crate) error: Option<String>,
 }
 
 /// Data loaded for the profile page.
@@ -68,6 +81,9 @@ pub struct RootView {
     pub(crate) client: Client,
     pub(crate) demo: bool,
     pub(crate) token_input: Entity<TextInput>,
+    pub(crate) search_input: Entity<TextInput>,
+    pub(crate) search: SearchState,
+    pub(crate) search_epoch: u64,
     pub(crate) show_token_input: bool,
     pub(crate) login_error: Option<String>,
     pub(crate) device: Option<DeviceFlow>,
@@ -86,6 +102,7 @@ pub struct RootView {
     pub(crate) viewport_height: f32,
     window_size_epoch: u64,
     _token_subscription: Subscription,
+    _search_subscription: Subscription,
     _ticker: Task<()>,
 }
 
@@ -111,6 +128,18 @@ impl RootView {
                 }
             });
 
+        let search_input = cx.new(|cx| {
+            TextInput::new(cx)
+                .placeholder("Трек, исполнитель или альбом")
+                .monospace(false)
+        });
+        let search_subscription =
+            cx.subscribe(&search_input, |this, _input, event: &TextInputEvent, cx| {
+                if let TextInputEvent::Submit(_) = event {
+                    this.perform_search(cx);
+                }
+            });
+
         let ticker = Self::spawn_ticker(cx);
         let viewport = window.viewport_size();
 
@@ -119,6 +148,9 @@ impl RootView {
             client,
             demo: false,
             token_input,
+            search_input,
+            search: SearchState::default(),
+            search_epoch: 0,
             show_token_input: false,
             login_error: None,
             device: None,
@@ -137,6 +169,7 @@ impl RootView {
             viewport_height: f32::from(viewport.height),
             window_size_epoch: 0,
             _token_subscription: token_subscription,
+            _search_subscription: search_subscription,
             _ticker: ticker,
         };
 
@@ -409,7 +442,10 @@ impl RootView {
         self.login_error = None;
         self.show_token_input = false;
         self.pending_save_token = None;
+        self.search = SearchState::default();
+        self.search_epoch += 1;
         self.token_input.update(cx, |input, cx| input.clear(cx));
+        self.search_input.update(cx, |input, cx| input.clear(cx));
         cx.notify();
     }
 
@@ -569,6 +605,9 @@ impl RootView {
         self.queue.clear();
         self.queue_index = None;
         self.player.reset();
+        self.search = SearchState::default();
+        self.search_epoch += 1;
+        self.search_input.update(cx, |input, cx| input.clear(cx));
 
         let tracks = demo::tracks();
         self.covers = demo::covers(&tracks);
@@ -591,6 +630,135 @@ impl RootView {
         self.player.error = None;
         self.player.quality = Some("MP3 · 320 кбит/с · демо".into());
         cx.notify();
+    }
+
+    // ------------------------------------------------------------------- Search
+
+    pub(crate) fn open_search(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        if matches!(self.screen, Screen::Login | Screen::Loading) {
+            return;
+        }
+        self.screen = Screen::Search;
+        let focus = self.search_input.read(cx).focus_handle(cx);
+        window.focus(&focus);
+        cx.notify();
+    }
+
+    pub(crate) fn open_profile(&mut self, cx: &mut Context<Self>) {
+        self.screen = Screen::Profile;
+        cx.notify();
+    }
+
+    pub(crate) fn perform_search(&mut self, cx: &mut Context<Self>) {
+        let query = self.search_input.read(cx).text().trim().to_string();
+        if query.is_empty() {
+            self.search.searched = true;
+            self.search.error = Some("Введите запрос для поиска.".into());
+            self.search.loading = false;
+            self.search.results.clear();
+            self.search.total = 0;
+            cx.notify();
+            return;
+        }
+
+        self.search_epoch += 1;
+        let epoch = self.search_epoch;
+        self.search.query = query.clone();
+        self.search.searched = true;
+        self.search.loading = true;
+        self.search.error = None;
+        self.search.results.clear();
+        self.search.total = 0;
+        cx.notify();
+
+        if self.demo {
+            let needle = query.to_lowercase();
+            let results: Vec<Track> = self
+                .profile
+                .as_ref()
+                .map(|profile| {
+                    profile
+                        .sample
+                        .iter()
+                        .filter(|track| {
+                            let haystack = format!(
+                                "{} {} {}",
+                                track.display_title(),
+                                track.artist_names(),
+                                track
+                                    .albums
+                                    .first()
+                                    .and_then(|album| album.title.as_deref())
+                                    .unwrap_or_default()
+                            )
+                            .to_lowercase();
+                            haystack.contains(&needle)
+                        })
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            self.search.loading = false;
+            self.search.total = results.len();
+            self.search.results = results.clone();
+            self.load_covers(results, cx);
+            cx.notify();
+            return;
+        }
+
+        let client = self.client.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { client.search_tracks(&query, 0) })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.search_epoch != epoch {
+                    return;
+                }
+                this.search.loading = false;
+                match result {
+                    Ok(found) => {
+                        this.search.total = found.total as usize;
+                        this.search.results = found.results;
+                        this.search.error = None;
+                        let tracks = this.search.results.clone();
+                        this.load_covers(tracks, cx);
+                    }
+                    Err(error) => {
+                        this.search.error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(crate) fn play_search_result(&mut self, track: Track, cx: &mut Context<Self>) {
+        let same_track = self
+            .player
+            .track
+            .as_ref()
+            .is_some_and(|current| current.id == track.id);
+
+        if same_track {
+            self.toggle_playback(cx);
+            return;
+        }
+
+        let results = self.search.results.clone();
+        self.queue = results.iter().map(Track::full_id).collect();
+        self.queue_index = results.iter().position(|item| item.id == track.id);
+
+        if self.demo {
+            self.start_demo_track(track, cx);
+        } else {
+            let full_id = track.full_id();
+            self.load_and_play(Some(track), full_id, cx);
+        }
     }
 
     // ----------------------------------------------------------------- Playback

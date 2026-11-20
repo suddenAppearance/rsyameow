@@ -70,6 +70,6 @@ pub use client::{Client, ClientBuilder};
 pub use download::{DownloadInfo, DownloadedTrack, SIGN_SALT, build_direct_link};
 pub use error::{Error, Result};
 pub use models::{
-    Account, Album, Artist, Cover, Permissions, Plus, Status, Subscription, Track, TrackShort,
-    TracksList,
+    Account, Album, Artist, Cover, Permissions, Plus, SearchResult, Status, Subscription, Track,
+    TrackShort, TracksList,
 };
