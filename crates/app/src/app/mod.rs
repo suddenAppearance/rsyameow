@@ -26,8 +26,8 @@ pub(crate) use presentation::{plan_name, plus_until, registered_year};
 use crate::audio::AudioEngine;
 use crate::{config, demo, format};
 use gpui::{
-    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Hsla, Image, Rgba, Subscription,
-    Task, Timer, WeakEntity, actions, prelude::*,
+    ClipboardItem, Context, Entity, FocusHandle, Focusable as _, Hsla, Image, Rgba, ScrollHandle,
+    Subscription, Task, Timer, WeakEntity, actions, prelude::*,
 };
 use rand::Rng as _;
 use rsyameow_ui::{TextInput, TextInputEvent};
@@ -157,6 +157,8 @@ pub(crate) struct PlaylistsState {
     pub(crate) selected: Option<Playlist>,
     pub(crate) tracks: Vec<Track>,
     pub(crate) tracks_loading: bool,
+    pub(crate) detail_loading_more: bool,
+    pub(crate) detail_exhausted: bool,
     pub(crate) tracks_error: Option<String>,
     pub(crate) epoch: u64,
     pub(crate) detail_epoch: u64,
@@ -301,7 +303,11 @@ pub struct RootView {
     previous_volume: f32,
     pub(crate) like_busy: bool,
     pub(crate) liked_reloading: bool,
+    pub(crate) liked_loading_more: bool,
+    pub(crate) liked_exhausted: bool,
     pub(crate) liked_error: Option<String>,
+    pub(crate) liked_scroll: ScrollHandle,
+    pub(crate) playlist_scroll: ScrollHandle,
     liked_reload_epoch: u64,
     pub(crate) viewport_width: f32,
     pub(crate) viewport_height: f32,
@@ -409,7 +415,11 @@ impl RootView {
             previous_volume: if volume > 0.0 { volume } else { 0.85 },
             like_busy: false,
             liked_reloading: false,
+            liked_loading_more: false,
+            liked_exhausted: false,
             liked_error: None,
+            liked_scroll: ScrollHandle::new(),
+            playlist_scroll: ScrollHandle::new(),
             liked_reload_epoch: 0,
             viewport_width: f32::from(viewport.width),
             viewport_height: f32::from(viewport.height),
@@ -467,6 +477,32 @@ impl RootView {
                     if !immersive && this.player.playing && tick.is_multiple_of(6) {
                         this.animation_phase = this.animation_phase.wrapping_add(1);
                     }
+
+                    let liked_more = this
+                        .profile
+                        .as_ref()
+                        .is_some_and(|profile| profile.sample.len() < profile.liked.len());
+                    if matches!(this.screen, Screen::Liked)
+                        && liked_more
+                        && !this.liked_loading_more
+                        && !this.liked_exhausted
+                        && scroll_near_bottom(&this.liked_scroll, 600.0)
+                    {
+                        this.load_more_liked(cx);
+                    }
+
+                    let playlist_more = this.playlists.selected.as_ref().is_some_and(|playlist| {
+                        playlist.tracks.len() > this.playlists.tracks.len()
+                    });
+                    if matches!(this.screen, Screen::Playlist)
+                        && playlist_more
+                        && !this.playlists.detail_loading_more
+                        && !this.playlists.detail_exhausted
+                        && scroll_near_bottom(&this.playlist_scroll, 600.0)
+                    {
+                        this.load_more_playlist_tracks(cx);
+                    }
+
                     if !this.player.playing || this.player.loading {
                         return;
                     }
@@ -516,4 +552,13 @@ impl Drop for RootView {
         let _ = config::save_window_size(self.viewport_width, self.viewport_height);
         self.save_state_now();
     }
+}
+
+fn scroll_near_bottom(handle: &ScrollHandle, threshold: f32) -> bool {
+    let max = f32::from(handle.max_offset().height);
+    if max <= 0.0 {
+        return false;
+    }
+    let offset = -f32::from(handle.offset().y);
+    offset >= (max - threshold).max(0.0)
 }

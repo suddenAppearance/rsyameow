@@ -138,10 +138,110 @@ impl RootView {
         .detach();
     }
 
+    /// Load the next batch of playlist tracks. The detail response contains all
+    /// track ids, but only the first 100 tracks are resolved initially.
+    pub(crate) fn load_more_playlist_tracks(&mut self, cx: &mut Context<Self>) {
+        if self.playlists.tracks_loading
+            || self.playlists.detail_loading_more
+            || self.playlists.detail_exhausted
+        {
+            return;
+        }
+        let Some(playlist) = self.playlists.selected.clone() else {
+            return;
+        };
+        let loaded_ids = self
+            .playlists
+            .tracks
+            .iter()
+            .map(|track| track.full_id())
+            .collect::<Vec<_>>();
+        let ids: Vec<String> = playlist
+            .tracks
+            .iter()
+            .filter(|short| {
+                let full = short.track_id();
+                !loaded_ids.iter().any(|id| id == &full || id == &short.id)
+            })
+            .take(50)
+            .map(TrackShort::track_id)
+            .collect();
+        if ids.is_empty() {
+            self.playlists.detail_exhausted = true;
+            return;
+        }
+
+        if self.demo {
+            let tracks = self
+                .profile
+                .as_ref()
+                .map(|profile| {
+                    ids.iter()
+                        .filter_map(|id| {
+                            profile
+                                .sample
+                                .iter()
+                                .find(|track| &track.id == id || track.full_id() == *id)
+                                .cloned()
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if tracks.is_empty() {
+                self.playlists.detail_exhausted = true;
+            }
+            self.playlists.tracks.extend(tracks.clone());
+            self.load_covers(tracks, cx);
+            cx.notify();
+            return;
+        }
+
+        self.playlists.detail_loading_more = true;
+        let epoch = self.playlists.detail_epoch;
+        let client = self.client.clone();
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx.background_spawn(async move { client.tracks(ids) }).await;
+            this.update(cx, |this, cx| {
+                if this.playlists.detail_epoch != epoch {
+                    return;
+                }
+                this.playlists.detail_loading_more = false;
+                match result {
+                    Ok(tracks) => {
+                        let before = this.playlists.tracks.len();
+                        for track in tracks {
+                            if !this.playlists.tracks.iter().any(|item| {
+                                item.id == track.id || item.full_id() == track.full_id()
+                            }) {
+                                this.playlists.tracks.push(track);
+                            }
+                        }
+                        if this.playlists.tracks.len() == before {
+                            this.playlists.detail_exhausted = true;
+                        }
+                        this.playlists.tracks_error = None;
+                        let tracks = this.playlists.tracks.clone();
+                        this.load_covers(tracks, cx);
+                    }
+                    Err(error) => {
+                        this.playlists.tracks_error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn back_to_playlists(&mut self, cx: &mut Context<Self>) {
         self.screen = Screen::Playlists;
         self.playlists.selected = None;
         self.playlists.tracks.clear();
+        self.playlists.detail_loading_more = false;
+        self.playlists.detail_exhausted = false;
         self.playlists.detail_epoch = self.playlists.detail_epoch.wrapping_add(1);
         self.schedule_state_save(cx);
         cx.notify();
@@ -152,6 +252,8 @@ impl RootView {
         self.playlists.selected = Some(playlist.clone());
         self.playlists.tracks.clear();
         self.playlists.tracks_loading = true;
+        self.playlists.detail_loading_more = false;
+        self.playlists.detail_exhausted = false;
         self.playlists.tracks_error = None;
         self.playlists.detail_epoch = self.playlists.detail_epoch.wrapping_add(1);
         let epoch = self.playlists.detail_epoch;

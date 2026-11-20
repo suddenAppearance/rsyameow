@@ -24,8 +24,8 @@ use crate::format;
 use gpui::{
     AnyElement, BorderStyle, Bounds, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla,
     Image, ImageSource, IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba,
-    SharedString, Stateful, Window, canvas, div, img, linear_color_stop, linear_gradient, point,
-    prelude::*, px, quad, relative, rgba, size,
+    ScrollHandle, SharedString, Stateful, Window, canvas, div, img, linear_color_stop,
+    linear_gradient, point, prelude::*, px, quad, relative, rgba, size,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,

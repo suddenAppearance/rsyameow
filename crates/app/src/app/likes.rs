@@ -24,6 +24,87 @@ impl RootView {
         self.is_track_liked(track)
     }
 
+    /// Load the next page of details for the liked collection. The initial
+    /// profile request only resolves the first 24 tracks; the rest are fetched
+    /// as the user scrolls.
+    pub(crate) fn load_more_liked(&mut self, cx: &mut Context<Self>) {
+        if self.liked_loading_more || self.liked_reloading || self.liked_exhausted || self.demo {
+            return;
+        }
+        let Some(profile) = self.profile.as_ref() else {
+            return;
+        };
+        let ids: Vec<String> = profile
+            .liked
+            .iter()
+            .filter(|short| {
+                !profile
+                    .sample
+                    .iter()
+                    .any(|track| track.id == short.id || track.full_id() == short.track_id())
+            })
+            .take(24)
+            .map(TrackShort::track_id)
+            .collect();
+        if ids.is_empty() {
+            self.liked_exhausted = true;
+            return;
+        }
+
+        self.liked_loading_more = true;
+        let epoch = self.profile_epoch;
+        let client = self.client.clone();
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx.background_spawn(async move { client.tracks(ids) }).await;
+            this.update(cx, |this, cx| {
+                if this.profile_epoch != epoch {
+                    return;
+                }
+                this.liked_loading_more = false;
+                match result {
+                    Ok(tracks) => {
+                        let before = this
+                            .profile
+                            .as_ref()
+                            .map(|profile| profile.sample.len())
+                            .unwrap_or(0);
+                        if let Some(profile) = this.profile.as_mut() {
+                            for track in tracks {
+                                if !profile.sample.iter().any(|item| {
+                                    item.id == track.id || item.full_id() == track.full_id()
+                                }) {
+                                    profile.sample.push(track);
+                                }
+                            }
+                        }
+                        if this
+                            .profile
+                            .as_ref()
+                            .is_none_or(|profile| profile.sample.len() == before)
+                        {
+                            this.liked_exhausted = true;
+                        }
+                        let tracks = this
+                            .profile
+                            .as_ref()
+                            .map(|profile| profile.sample.clone())
+                            .unwrap_or_default();
+                        this.load_covers(tracks, cx);
+                        this.liked_error = None;
+                    }
+                    Err(error) => {
+                        this.liked_error = Some(error_text(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Refresh only the liked collection, keeping the current screen and
     /// playback session intact.
     pub(crate) fn reload_liked(&mut self, cx: &mut Context<Self>) {
@@ -55,6 +136,7 @@ impl RootView {
 
         self.liked_reloading = true;
         self.liked_error = None;
+        self.liked_exhausted = false;
         self.liked_reload_epoch = self.liked_reload_epoch.wrapping_add(1);
         let request = self.liked_reload_epoch;
         let epoch = self.profile_epoch;

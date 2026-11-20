@@ -21,6 +21,8 @@ impl RootView {
         self.queue_fetching = false;
         self.like_busy = false;
         self.liked_reloading = false;
+        self.liked_loading_more = false;
+        self.liked_exhausted = false;
         self.liked_error = None;
         self.liked_reload_epoch = self.liked_reload_epoch.wrapping_add(1);
         self.player.reset();

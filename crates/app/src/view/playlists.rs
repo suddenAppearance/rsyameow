@@ -488,10 +488,21 @@ impl RootView {
             body = body.child(list);
         }
 
-        immersive_scroll_page(
+        if self.playlists.detail_loading_more {
+            body = body.child(
+                div()
+                    .flex()
+                    .justify_center()
+                    .py(px(space::MD))
+                    .child(Spinner::new().size(18.0).color(theme.colors.accent)),
+            );
+        }
+
+        immersive_scroll_page_tracked(
             palette,
             backdrop,
             "playlist-detail-scroll",
+            &self.playlist_scroll,
             div()
                 .w_full()
                 .flex()

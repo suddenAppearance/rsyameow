@@ -74,6 +74,7 @@ impl RootView {
             .min_w(px(0.0))
             .h_full()
             .id("liked-scroll")
+            .track_scroll(&self.liked_scroll)
             .overflow_y_scroll()
             .child(
                 div().w_full().flex().justify_center().child(
@@ -88,7 +89,16 @@ impl RootView {
                         .when_some(self.liked_error.clone(), |element, error| {
                             element.child(error_banner(theme, &error))
                         })
-                        .child(self.liked_section(theme, cx)),
+                        .child(self.liked_section(theme, cx))
+                        .when(self.liked_loading_more, |element| {
+                            element.child(
+                                div()
+                                    .flex()
+                                    .justify_center()
+                                    .py(px(space::MD))
+                                    .child(Spinner::new().size(18.0).color(theme.colors.accent)),
+                            )
+                        }),
                 ),
             )
             .into_any_element()
