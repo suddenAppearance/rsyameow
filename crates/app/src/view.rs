@@ -8,8 +8,8 @@ use crate::format;
 use gpui::{
     AnyElement, BorderStyle, Bounds, Context, CursorStyle, Div, ElementId, Focusable as _, Hsla,
     Image, ImageSource, IntoElement, MouseButton, ObjectFit, Render, ResizeEdge, Rgba,
-    SharedString, Stateful, Window, canvas, div, img, linear_color_stop, linear_gradient, point,
-    prelude::*, px, quad, relative, rgba, size,
+    SharedString, Stateful, Window, canvas, div, img, point, prelude::*, px, quad, relative, rgba,
+    size,
 };
 use rsyameow_ui::{
     Avatar, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, Icon, IconButton, PlayerBar,
@@ -47,6 +47,7 @@ impl Render for RootView {
             Screen::ArtistAlbums => self.artist_albums_view(&theme, cx),
             Screen::Album => self.album_view(&theme, cx),
             Screen::Track => self.track_view(&theme, cx),
+            Screen::NowPlaying => self.now_playing_view(&theme, cx),
             Screen::Wave => self.wave_view(&theme, cx),
         };
 
@@ -1032,6 +1033,7 @@ impl RootView {
         let profile_active = matches!(self.screen, Screen::Profile);
         let liked_active = matches!(self.screen, Screen::Liked);
         let wave_active = matches!(self.screen, Screen::Wave);
+        let now_active = matches!(self.screen, Screen::NowPlaying);
         let search_active = matches!(self.screen, Screen::Search);
         let playlists_active = matches!(self.screen, Screen::Playlists | Screen::Playlist);
         let accent = theme.colors.accent;
@@ -1064,6 +1066,35 @@ impl RootView {
             }))
             .child("Любимые")
             .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| this.open_liked(cx)));
+
+        let nav_now = div()
+            .id("nav-now-playing")
+            .flex()
+            .items_center()
+            .gap(px(space::MD))
+            .h(px(42.0))
+            .px(px(space::MD))
+            .rounded(px(10.0))
+            .cursor_pointer()
+            .text_size(px(text::BASE))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .when(now_active, |element| {
+                element.bg(theme.colors.accent_soft).text_color(accent)
+            })
+            .when(!now_active, |element| {
+                element
+                    .text_color(secondary)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(Icon::new(icons::MUSIC).size(17.0).color(if now_active {
+                accent
+            } else {
+                secondary
+            }))
+            .child("Сейчас играет")
+            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                this.open_now_playing(cx);
+            }));
 
         let nav_wave = div()
             .id("nav-wave")
@@ -1251,6 +1282,7 @@ impl RootView {
                     .child(section_label(theme, "МЕНЮ"))
                     .child(nav_liked)
                     .child(nav_wave)
+                    .child(nav_now)
                     .child(nav_search)
                     .child(nav_playlists),
             )
@@ -2815,16 +2847,29 @@ impl RootView {
     }
 
     fn track_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let content = self.track_content(theme, cx);
+        let content = self.track_content(theme, false, cx);
         self.app_shell(theme, cx, content)
     }
 
-    fn track_content(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let Some(track) = self
-            .page_track
-            .clone()
-            .or_else(|| self.player.track.clone())
-        else {
+    fn now_playing_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let content = self.track_content(theme, true, cx);
+        self.app_shell(theme, cx, content)
+    }
+
+    fn track_content(
+        &mut self,
+        theme: &Theme,
+        current_only: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let track = if current_only {
+            self.player.track.clone()
+        } else {
+            self.page_track
+                .clone()
+                .or_else(|| self.player.track.clone())
+        };
+        let Some(track) = track else {
             return div()
                 .flex()
                 .flex_col()
@@ -2853,7 +2898,16 @@ impl RootView {
                 .into_any_element();
         };
 
-        let palette = self.track_palette(&track.id);
+        let target_palette = self.track_palette(&track.id);
+        let palette = if current_only {
+            self.now_playing_palette(&track.id, target_palette)
+        } else {
+            target_palette
+        };
+        if current_only {
+            self.load_track_lyrics(track.clone(), cx);
+            self.load_track_backdrop(track.clone(), cx);
+        }
         let backdrop = self.track_backdrop(&track.id);
         let is_current = self
             .player
@@ -2984,8 +3038,12 @@ impl RootView {
                         .icon(if playing { icons::PAUSE } else { icons::PLAY })
                         .loading(loading)
                         .on_click(cx.listener(
-                            |this, _: &gpui::ClickEvent, _, cx| {
-                                this.play_page_track(cx);
+                            move |this, _: &gpui::ClickEvent, _, cx| {
+                                if current_only {
+                                    this.toggle_playback(cx);
+                                } else {
+                                    this.play_page_track(cx);
+                                }
                             },
                         )),
                     )
@@ -4326,7 +4384,7 @@ impl RootView {
                 this.toggle_queue(cx);
             }))
             .on_track(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
-                this.open_track_page(cx);
+                this.open_now_playing(cx);
             }))
             .on_artist(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
                 if let Some(artist) = artist_link.clone()
@@ -4472,6 +4530,7 @@ fn screen_title(screen: &Screen) -> &'static str {
         Screen::ArtistAlbums => "Альбомы артиста",
         Screen::Album => "Альбом",
         Screen::Track => "Трек",
+        Screen::NowPlaying => "Сейчас играет",
         Screen::Wave => "Моя волна",
         Screen::LoadError(_) => "Ошибка",
     }
@@ -4656,8 +4715,6 @@ fn immersive_background(
     phase: u64,
 ) -> AnyElement {
     let (base, glow) = palette;
-    let angle = 110.0 + (phase as f32 * 0.24) % 360.0;
-    let base_hsla: Hsla = base.into();
     let glow_hsla: Hsla = glow.into();
 
     let mut layer = div()
@@ -4675,35 +4732,11 @@ fn immersive_background(
                 .left(px(0.0))
                 .size_full()
                 .object_fit(ObjectFit::Cover)
-                .opacity(0.46),
+                .opacity(0.52),
         );
     }
 
     layer
-        .child(
-            div()
-                .absolute()
-                .top(px(0.0))
-                .left(px(0.0))
-                .size_full()
-                .bg(linear_gradient(
-                    angle,
-                    linear_color_stop(glow_hsla.opacity(0.42), 0.0),
-                    linear_color_stop(base_hsla.opacity(0.0), 1.0),
-                )),
-        )
-        .child(
-            div()
-                .absolute()
-                .top(px(0.0))
-                .left(px(0.0))
-                .size_full()
-                .bg(linear_gradient(
-                    (angle + 140.0) % 360.0,
-                    linear_color_stop(base_hsla.opacity(0.68), 0.0),
-                    linear_color_stop(glow_hsla.opacity(0.2), 1.0),
-                )),
-        )
         .child(
             canvas(
                 |_, _, _| {},
@@ -4722,7 +4755,7 @@ fn immersive_background(
                 .top(px(0.0))
                 .left(px(0.0))
                 .size_full()
-                .bg(rgba(0x05050540)),
+                .bg(rgba(0x05050538)),
         )
         .into_any_element()
 }
@@ -4737,41 +4770,47 @@ fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla, p
     let colors = [
         Hsla {
             h: glow.h,
-            s: 0.88,
+            s: 0.9,
             l: 0.58,
-            a: 0.024,
+            a: 1.0,
         },
         Hsla {
             h: (glow.h + 0.18) % 1.0,
-            s: 0.82,
-            l: 0.54,
-            a: 0.021,
+            s: 0.86,
+            l: 0.55,
+            a: 1.0,
         },
         Hsla {
             h: (glow.h + 0.72) % 1.0,
-            s: 0.78,
-            l: 0.5,
-            a: 0.021,
+            s: 0.8,
+            l: 0.52,
+            a: 1.0,
         },
         Hsla {
             h: (glow.h + 0.42) % 1.0,
-            s: 0.7,
-            l: 0.7,
-            a: 0.017,
+            s: 0.74,
+            l: 0.68,
+            a: 1.0,
         },
     ];
+    let placements = [
+        (0.26, 0.3, 0.48),
+        (0.74, 0.3, 0.44),
+        (0.3, 0.72, 0.5),
+        (0.76, 0.7, 0.4),
+    ];
 
+    let min_side = width.min(height);
     for (index, color) in colors.into_iter().enumerate() {
-        let offset = index as f32 * 1.83;
-        let drift = phase * 0.026;
-        let center_x =
-            f32::from(bounds.origin.x) + width * (0.5 + 0.34 * (drift * 0.7 + offset).sin());
-        let center_y = f32::from(bounds.origin.y)
-            + height * (0.5 + 0.3 * (drift * 0.55 + offset * 1.31).cos());
-        let radius = width.min(height) * (0.3 + 0.06 * (drift * 0.8 + offset * 0.9).sin());
+        let (x, y, radius_factor) = placements[index];
+        let pulse = 0.55 + 0.45 * (phase * 0.018 + index as f32 * 1.9).sin();
+        let center_x = f32::from(bounds.origin.x) + width * x;
+        let center_y = f32::from(bounds.origin.y) + height * y;
+        let radius = min_side * radius_factor;
+        let ring_alpha = 0.006 * pulse;
 
-        for ring in (0..22).rev() {
-            let progress = (ring + 1) as f32 / 22.0;
+        for ring in (0..80).rev() {
+            let progress = (ring + 1) as f32 / 80.0;
             let ring_radius = radius * progress;
             let blob = Bounds {
                 origin: point(px(center_x - ring_radius), px(center_y - ring_radius)),
@@ -4780,7 +4819,10 @@ fn paint_liquid(window: &mut Window, bounds: Bounds<gpui::Pixels>, glow: Hsla, p
             window.paint_quad(quad(
                 blob,
                 px(ring_radius),
-                color,
+                Hsla {
+                    a: ring_alpha,
+                    ..color
+                },
                 px(0.0),
                 gpui::transparent_black(),
                 BorderStyle::default(),
